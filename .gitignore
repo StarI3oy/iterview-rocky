@@ -1,0 +1,11 @@
+prep_app/backend/prep-server
+prep_app/backend/*.db
+prep_app/app/.dart_tool/
+prep_app/app/.flutter-plugins
+prep_app/app/.flutter-plugins-dependencies
+prep_app/app/build/
+prep_app/app/.idea/
+prep_app/app/*.iml
+*.db
+*.db-shm
+*.db-wal
