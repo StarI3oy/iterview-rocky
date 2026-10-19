@@ -58,26 +58,29 @@ class _PrepCodeEditorState extends State<PrepCodeEditor> {
         borderRadius: BorderRadius.circular(12),
         child: CodeTheme(
           data: CodeThemeData(styles: monokaiSublimeTheme),
-          child: CodeField(
+          child: TextField(
             controller: _controller,
-            expands: widget.expands,
             readOnly: widget.readOnly,
-            wrap: false,
-            textStyle: const TextStyle(
+            expands: widget.expands,
+            minLines: widget.expands ? null : 8,
+            maxLines: null,
+            textAlignVertical: TextAlignVertical.top,
+            cursorColor: AppColors.accent,
+            style: const TextStyle(
               fontFamily: 'monospace',
               fontSize: 13.5,
               height: 1.45,
               color: AppColors.text,
             ),
-            gutterStyle: const GutterStyle(
-              width: 48,
-              margin: 8,
-              showErrors: false,
-              showFoldingHandles: false,
-              textStyle: TextStyle(color: AppColors.muted),
-              background: Color(0xFF12141A),
+            decoration: const InputDecoration(
+              filled: true,
+              fillColor: Color(0xFF12141A),
+              contentPadding: EdgeInsets.all(12),
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              disabledBorder: InputBorder.none,
             ),
-            background: const Color(0xFF12141A),
           ),
         ),
       ),
