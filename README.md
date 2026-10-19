@@ -4,6 +4,8 @@
 
 Исходный дамп лежит в `prep_app/data/prep_app_knowledge_export.json` и читаемой книгой в `prep_app/data/prep_app_knowledge_base.md`. При старте сервер ищет `/home/shaman/prep_app_knowledge_export.json` (или `KNOWLEDGE_JSON`) и обновляет карточки. Повторный импорт не сбрасывает прогресс: `times_asked`, `last_result`, `closed`, `status`.
 
+Запуск, проверка, бэкап и типовые сбои — в [RUNBOOK.md](RUNBOOK.md).
+
 ## Запуск
 
 ```bash
