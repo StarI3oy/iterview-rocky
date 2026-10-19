@@ -23,6 +23,23 @@ class Session extends ChangeNotifier {
 
   void openHard() => _open(mode: 'mobile', kind: 'hard');
 
+  void openTrack(String track) {
+    const known = {
+      'dumps',
+      'patterns',
+      'system_design',
+      'legend',
+      'library',
+      'concept',
+    };
+    if (!known.contains(track)) {
+      openSprint();
+      return;
+    }
+    final mode = track == 'patterns' ? 'web' : 'mobile';
+    _open(mode: mode, kind: track);
+  }
+
   void openItem(int id) => _open(mode: mode, kind: kind, focus: id);
 
   void _open({required String mode, required String kind, int? focus}) {

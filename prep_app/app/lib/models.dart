@@ -128,6 +128,32 @@ class BlockStat {
   }
 }
 
+class AskedQuestion {
+  const AskedQuestion({
+    required this.id,
+    required this.topic,
+    required this.question,
+    required this.timesAsked,
+    required this.understood,
+  });
+
+  final int id;
+  final String topic;
+  final String question;
+  final int timesAsked;
+  final bool understood;
+
+  factory AskedQuestion.fromJson(Map<String, dynamic> j) {
+    return AskedQuestion(
+      id: asInt(j['id']),
+      topic: (j['topic'] ?? '').toString(),
+      question: (j['question'] ?? '').toString(),
+      timesAsked: asInt(j['times_asked']),
+      understood: asBool(j['understood']),
+    );
+  }
+}
+
 class BarStatus {
   const BarStatus({
     required this.overall,
@@ -135,6 +161,11 @@ class BarStatus {
     required this.total,
     required this.empty,
     required this.blocks,
+    this.protocol = '',
+    this.today = '',
+    this.todayTrack = '',
+    this.studied = 0,
+    this.tracker = const [],
   });
 
   final int overall;
@@ -142,6 +173,11 @@ class BarStatus {
   final int total;
   final bool empty;
   final List<BlockStat> blocks;
+  final String protocol;
+  final String today;
+  final String todayTrack;
+  final int studied;
+  final List<AskedQuestion> tracker;
 
   factory BarStatus.fromJson(Map<String, dynamic> j) {
     final raw = j['blocks'];
@@ -151,12 +187,23 @@ class BarStatus {
         blocks.add(BlockStat.fromJson(asMap(item)));
       }
     }
+    final tracker = <AskedQuestion>[];
+    if (j['tracker'] is List) {
+      for (final item in j['tracker'] as List) {
+        tracker.add(AskedQuestion.fromJson(asMap(item)));
+      }
+    }
     return BarStatus(
       overall: asInt(j['overall_percent']),
       done: asInt(j['done']),
       total: asInt(j['total']),
       empty: asBool(j['empty']),
       blocks: blocks,
+      protocol: (j['protocol'] ?? '').toString(),
+      today: (j['today'] ?? '').toString(),
+      todayTrack: (j['today_track'] ?? '').toString(),
+      studied: asInt(j['studied']),
+      tracker: tracker,
     );
   }
 }

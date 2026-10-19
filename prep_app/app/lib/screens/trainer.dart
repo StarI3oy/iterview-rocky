@@ -82,11 +82,16 @@ class _TrainerScreenState extends State<TrainerScreen> {
   String _emptyText() {
     switch (widget.session.kind) {
       case 'hard':
-        return 'Сложных концептов пока нет. Они появятся после провала вопроса.';
+        return 'Провалов пока нет. Они появятся, если отметить «Поплыл» или не сдать ревью.';
+      case 'concept':
+        return 'Разобранных концептов в базе нет.';
       case 'code':
-        return 'Кодовых задач в базе нет. Они появятся, когда загрузите карточки item_type = code.';
+      case 'patterns':
+        return 'Кодовых паттернов в базе нет.';
+      case 'library':
+        return 'В базе вопросов пусто.';
       default:
-        return 'Устных карточек пока нет. Загрузите базу — утренний спринт начнётся здесь.';
+        return 'В этом треке карточек нет.';
     }
   }
 

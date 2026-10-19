@@ -105,25 +105,95 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 14),
             _Blocks(bar: _bar!),
             const SizedBox(height: 18),
+            if (_bar!.protocol.isNotEmpty) ...[
+              const Text(
+                'Протокол',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              Panel(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 160),
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      _bar!.protocol,
+                      style: const TextStyle(height: 1.4),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             FilledButton(
               onPressed: widget.session.openSprint,
-              child: const Text('Утренний спринт'),
+              child: Text(
+                _bar!.today.isEmpty
+                    ? 'Утренний спринт'
+                    : 'Утренний спринт · ${_bar!.today}',
+              ),
             ),
             const SizedBox(height: 10),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
+                for (final block in _bar!.blocks)
+                  OutlinedButton(
+                    onPressed: () => widget.session.openTrack(block.id),
+                    child: Text(block.title),
+                  ),
                 OutlinedButton(
                   onPressed: widget.session.openCode,
                   child: const Text('Только кодовые задачи (Web)'),
                 ),
                 OutlinedButton(
-                  onPressed: widget.session.openHard,
-                  child: Text('Мои сложные концепты (${_hard.length})'),
+                  onPressed: () => widget.session.openTrack('concept'),
+                  child: Text('Разобранные концепты (${_bar!.studied})'),
                 ),
+                if (_hard.isNotEmpty)
+                  OutlinedButton(
+                    onPressed: widget.session.openHard,
+                    child: Text('Провалы (${_hard.length})'),
+                  ),
               ],
             ),
+            if (_bar!.tracker.isNotEmpty) ...[
+              const SizedBox(height: 22),
+              const Text(
+                'Уже спрашивали',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              for (final item in _bar!.tracker)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Panel(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.topic,
+                          style: const TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(item.question),
+                        const SizedBox(height: 4),
+                        Text(
+                          'раз ${item.timesAsked} · ${item.understood ? 'понял' : 'ещё плавает'}',
+                          style: const TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
             if (_queue.isNotEmpty) ...[
               const SizedBox(height: 22),
               const Text(

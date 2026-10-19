@@ -33,6 +33,14 @@ func main() {
 	}
 	defer st.Close()
 
+	if knowledge := knowledgePath(); knowledge != "" {
+		n, err := st.ImportKnowledge(knowledge)
+		if err != nil {
+			log.Fatalf("import %s: %v", knowledge, err)
+		}
+		log.Printf("база знаний: %s (%d записей)", knowledge, n)
+	}
+
 	n, err := st.CountItems()
 	if err != nil {
 		log.Fatalf("count: %v", err)
@@ -82,6 +90,27 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+}
+
+func knowledgePath() string {
+	if p := os.Getenv("KNOWLEDGE_JSON"); p != "" {
+		return p
+	}
+	candidates := []string{
+		"/home/shaman/prep_app_knowledge_export.json",
+		"prep_app/data/prep_app_knowledge_export.json",
+		"data/prep_app_knowledge_export.json",
+	}
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "prep_app_knowledge_export.json"))
+	}
+	for _, p := range candidates {
+		info, err := os.Stat(p)
+		if err == nil && !info.IsDir() {
+			return p
+		}
+	}
+	return ""
 }
 
 func env(key, fallback string) string {

@@ -47,6 +47,17 @@ type Item struct {
 	LastResult     *int     `json:"last_result,omitempty"`
 	Closed         bool     `json:"closed"`
 	RequiresCode   bool     `json:"requires_code"`
+	Track          string   `json:"track,omitempty"`
+	Section        string   `json:"section,omitempty"`
+	Status         string   `json:"status,omitempty"`
+}
+
+type TrackerItem struct {
+	ID         int64  `json:"id"`
+	Topic      string `json:"topic"`
+	Question   string `json:"question"`
+	TimesAsked int    `json:"times_asked"`
+	Understood bool   `json:"understood"`
 }
 
 type BlockStat struct {
@@ -58,11 +69,16 @@ type BlockStat struct {
 }
 
 type Bar struct {
-	OverallPercent int         `json:"overall_percent"`
-	Done           int         `json:"done"`
-	Total          int         `json:"total"`
-	Empty          bool        `json:"empty"`
-	Blocks         []BlockStat `json:"blocks"`
+	OverallPercent int           `json:"overall_percent"`
+	Done           int           `json:"done"`
+	Total          int           `json:"total"`
+	Empty          bool          `json:"empty"`
+	Blocks         []BlockStat   `json:"blocks"`
+	Protocol       string        `json:"protocol,omitempty"`
+	Today          string        `json:"today,omitempty"`
+	TodayTrack     string        `json:"today_track,omitempty"`
+	Studied        int           `json:"studied"`
+	Tracker        []TrackerItem `json:"tracker,omitempty"`
 }
 
 type HardConcept struct {
@@ -179,12 +195,64 @@ func (s *Store) Migrate() error {
 		{"closed", "INTEGER NOT NULL DEFAULT 0"},
 		{"created_at", "TEXT"},
 		{"updated_at", "TEXT"},
+		{"track", "TEXT"},
+		{"section", "TEXT"},
+		{"grade", "TEXT"},
+		{"difficulty", "INTEGER"},
+		{"question", "TEXT"},
+		{"theory", "TEXT"},
+		{"answer", "TEXT"},
+		{"source", "TEXT"},
+		{"source_url", "TEXT"},
+		{"slot", "TEXT"},
+		{"status", "TEXT"},
+		{"notes", "TEXT"},
 	}
 	if err := ensureColumns(s.Items, "prep_items", adds); err != nil {
 		return err
 	}
 	if err := backfillItems(s.Items); err != nil {
 		return err
+	}
+	if _, err := s.Items.Exec(`CREATE TABLE IF NOT EXISTS questions (
+		id INTEGER PRIMARY KEY,
+		topic TEXT NOT NULL DEFAULT '',
+		category TEXT NOT NULL DEFAULT '',
+		question TEXT NOT NULL DEFAULT '',
+		answer TEXT NOT NULL DEFAULT '',
+		grade TEXT NOT NULL DEFAULT '',
+		difficulty INTEGER NOT NULL DEFAULT 0,
+		source TEXT NOT NULL DEFAULT '',
+		is_answered INTEGER NOT NULL DEFAULT 0,
+		user_notes TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		return fmt.Errorf("create questions: %w", err)
+	}
+	if _, err := s.Items.Exec(`CREATE TABLE IF NOT EXISTS interview_tracker (
+		id INTEGER PRIMARY KEY,
+		topic TEXT NOT NULL DEFAULT '',
+		question TEXT NOT NULL DEFAULT '',
+		times_asked INTEGER NOT NULL DEFAULT 0,
+		user_understood INTEGER NOT NULL DEFAULT 0,
+		last_asked TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		return fmt.Errorf("create interview_tracker: %w", err)
+	}
+	if _, err := s.Items.Exec(`CREATE TABLE IF NOT EXISTS prep_tracks (
+		code TEXT PRIMARY KEY,
+		title TEXT NOT NULL DEFAULT '',
+		why TEXT NOT NULL DEFAULT '',
+		how_to_train TEXT NOT NULL DEFAULT '',
+		time_min INTEGER NOT NULL DEFAULT 0
+	)`); err != nil {
+		return fmt.Errorf("create prep_tracks: %w", err)
+	}
+	if _, err := s.Items.Exec(`CREATE TABLE IF NOT EXISTS prep_protocol (
+		id INTEGER PRIMARY KEY,
+		body TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		return fmt.Errorf("create prep_protocol: %w", err)
 	}
 	if _, err := s.Items.Exec(`CREATE TABLE IF NOT EXISTS web_queue (
 		question_id INTEGER PRIMARY KEY,
@@ -215,7 +283,22 @@ func (s *Store) Migrate() error {
 		{"last_failed_at", "TEXT"},
 		{"resolved", "INTEGER NOT NULL DEFAULT 0"},
 	}
-	return ensureColumns(s.Hard, "hard_concepts", hardAdds)
+	if err := ensureColumns(s.Hard, "hard_concepts", hardAdds); err != nil {
+		return err
+	}
+	_, err := s.Hard.Exec(`CREATE TABLE IF NOT EXISTS concepts (
+		id INTEGER PRIMARY KEY,
+		topic TEXT NOT NULL DEFAULT '',
+		title TEXT NOT NULL DEFAULT '',
+		simple_explanation TEXT NOT NULL DEFAULT '',
+		under_the_hood TEXT NOT NULL DEFAULT '',
+		pitfalls TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL DEFAULT ''
+	)`)
+	if err != nil {
+		return fmt.Errorf("create concepts: %w", err)
+	}
+	return nil
 }
 
 func ensureColumns(db *sql.DB, table string, cols []struct{ name, def string }) error {
@@ -333,6 +416,25 @@ func backfillItems(db *sql.DB) error {
 	return err
 }
 
+func TrackTitle(track string) string {
+	switch track {
+	case "dumps":
+		return "Секции компаний"
+	case "patterns":
+		return "Алгоритмы по паттернам"
+	case "system_design":
+		return "System Design"
+	case "legend":
+		return "Легенда"
+	case "library":
+		return "База вопросов"
+	case "concept":
+		return "Hard concept"
+	default:
+		return BlockTitle(track)
+	}
+}
+
 func BlockTitle(block string) string {
 	switch NormalizeBlock(block) {
 	case BlockGo:
@@ -376,6 +478,145 @@ func (s *Store) CountItems() (int, error) {
 }
 
 func (s *Store) Bar() (Bar, error) {
+	if n, err := s.trackCount(); err == nil && n > 0 {
+		return s.barByTracks()
+	}
+	return s.barByBlocks()
+}
+
+func (s *Store) trackCount() (int, error) {
+	var n int
+	err := s.Items.QueryRow(`SELECT COUNT(*) FROM prep_tracks`).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (s *Store) barByTracks() (Bar, error) {
+	type meta struct {
+		code, title string
+	}
+	rows, err := s.Items.Query(`SELECT code, title FROM prep_tracks ORDER BY rowid`)
+	if err != nil {
+		return Bar{}, err
+	}
+	var tracks []meta
+	for rows.Next() {
+		var m meta
+		if err := rows.Scan(&m.code, &m.title); err != nil {
+			rows.Close()
+			return Bar{}, err
+		}
+		tracks = append(tracks, m)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return Bar{}, err
+	}
+	type acc struct{ done, total int }
+	by := map[string]*acc{}
+	for _, t := range tracks {
+		by[t.code] = &acc{}
+	}
+	irows, err := s.Items.Query(`SELECT COALESCE(track,''), COALESCE(item_type,''), last_result, COALESCE(closed,0), COALESCE(status,'')
+		FROM prep_items WHERE COALESCE(track,'') NOT IN ('library','concept','')`)
+	if err != nil {
+		return Bar{}, err
+	}
+	defer irows.Close()
+	var done, total int
+	for irows.Next() {
+		var track, itemType, status string
+		var last sql.NullInt64
+		var closed int
+		if err := irows.Scan(&track, &itemType, &last, &closed, &status); err != nil {
+			return Bar{}, err
+		}
+		total++
+		ok := isMastered(itemType, last, closed, status)
+		if ok {
+			done++
+		}
+		if bucket, exists := by[track]; exists {
+			bucket.total++
+			if ok {
+				bucket.done++
+			}
+		}
+	}
+	if err := irows.Err(); err != nil {
+		return Bar{}, err
+	}
+	bar := Bar{
+		OverallPercent: percent(done, total),
+		Done:           done,
+		Total:          total,
+		Empty:          total == 0,
+		Blocks:         make([]BlockStat, 0, len(tracks)),
+	}
+	for _, t := range tracks {
+		a := by[t.code]
+		bar.Blocks = append(bar.Blocks, BlockStat{
+			ID:      t.code,
+			Title:   t.title,
+			Percent: percent(a.done, a.total),
+			Done:    a.done,
+			Total:   a.total,
+		})
+	}
+	_ = s.Items.QueryRow(`SELECT COUNT(*) FROM prep_items WHERE track = 'concept'`).Scan(&bar.Studied)
+	_ = s.Items.QueryRow(`SELECT body FROM prep_protocol WHERE id = 1`).Scan(&bar.Protocol)
+	bar.TodayTrack = todayTrack(time.Now())
+	bar.Today = TrackTitle(bar.TodayTrack)
+	if bar.TodayTrack == "system_design" {
+		bar.Today = "System Design или легенда"
+	}
+	bar.Tracker, _ = s.listTracker()
+	return bar, nil
+}
+
+func (s *Store) listTracker() ([]TrackerItem, error) {
+	rows, err := s.Items.Query(`SELECT id, COALESCE(topic,''), COALESCE(question,''), COALESCE(times_asked,0), COALESCE(user_understood,0)
+		FROM interview_tracker ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TrackerItem
+	for rows.Next() {
+		var it TrackerItem
+		var understood int
+		if err := rows.Scan(&it.ID, &it.Topic, &it.Question, &it.TimesAsked, &understood); err != nil {
+			return nil, err
+		}
+		it.Understood = understood == 1
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+func isMastered(itemType string, last sql.NullInt64, closed int, status string) bool {
+	if status == "done" || closed == 1 {
+		return true
+	}
+	if itemType == TypeCode {
+		return false
+	}
+	return last.Valid && last.Int64 == 1
+}
+
+func todayTrack(now time.Time) string {
+	if now.Weekday() == time.Sunday {
+		return "system_design"
+	}
+	if now.Day()%2 == 0 {
+		return "dumps"
+	}
+	return "patterns"
+}
+
+func (s *Store) barByBlocks() (Bar, error) {
 	rows, err := s.Items.Query(`SELECT COALESCE(block,''), COALESCE(item_type,''), last_result, COALESCE(closed,0) FROM prep_items`)
 	if err != nil {
 		return Bar{}, err
@@ -453,30 +694,71 @@ type FeedFilter struct {
 	SkipID int64
 }
 
+func isTrackKind(kind string) bool {
+	switch kind {
+	case "dumps", "patterns", "system_design", "legend", "library", "concept":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Store) Next(f FeedFilter) (*Item, error) {
 	if f.Kind == "hard" {
 		return s.nextHard(f.SkipID)
 	}
 	where := []string{"1=1"}
 	args := []any{}
+	order := `CASE WHEN last_result = 0 THEN 0 WHEN last_result IS NULL THEN 1 ELSE 2 END, times_asked ASC, id ASC`
 	switch {
-	case f.Mode == "web" || f.Kind == TypeCode || f.Kind == "code":
-		where = append(where, "item_type = ?", "closed = 0")
+	case f.Kind == "code" || (f.Mode == "web" && !isTrackKind(f.Kind) && f.Kind != "sprint"):
+		where = append(where, "item_type = ?", "COALESCE(closed,0) = 0")
 		args = append(args, TypeCode)
+	case isTrackKind(f.Kind):
+		where = append(where, "track = ?")
+		args = append(args, f.Kind)
+		if f.Kind == "patterns" {
+			where = append(where, "COALESCE(closed,0) = 0")
+		}
+	case f.Kind == "sprint" && s.hasCurriculum():
+		track := todayTrack(time.Now())
+		if track == "system_design" {
+			where = append(where, "track IN ('system_design','legend')")
+			order = `CASE track WHEN 'system_design' THEN 0 ELSE 1 END, ` + order
+		} else {
+			where = append(where, "track = ?")
+			args = append(args, track)
+		}
 	default:
 		where = append(where, "item_type IN (?, ?)")
 		args = append(args, TypeQuiz, TypeFlashcard)
+		where = append(where, "COALESCE(track,'') NOT IN ('library','concept')")
 	}
 	if f.SkipID > 0 {
 		where = append(where, "id != ?")
 		args = append(args, f.SkipID)
 	}
-	q := `SELECT id FROM prep_items WHERE ` + strings.Join(where, " AND ") + `
-		ORDER BY
-			CASE WHEN last_result = 0 THEN 0 WHEN last_result IS NULL THEN 1 ELSE 2 END,
-			times_asked ASC,
-			id ASC
-		LIMIT 1`
+	item, err := s.nextQuery(where, args, order)
+	if err != nil || item != nil || f.Kind != "sprint" || !s.hasCurriculum() {
+		return item, err
+	}
+	// Сегодняшняя дорожка закрыта — берём любую незакрытую карточку планки.
+	where = []string{"COALESCE(track,'') IN ('dumps','patterns','system_design','legend')", "COALESCE(last_result,0) <> 1", "COALESCE(closed,0) = 0"}
+	args = []any{}
+	if f.SkipID > 0 {
+		where = append(where, "id != ?")
+		args = append(args, f.SkipID)
+	}
+	return s.nextQuery(where, args, order)
+}
+
+func (s *Store) hasCurriculum() bool {
+	n, err := s.trackCount()
+	return err == nil && n > 0
+}
+
+func (s *Store) nextQuery(where []string, args []any, order string) (*Item, error) {
+	q := `SELECT id FROM prep_items WHERE ` + strings.Join(where, " AND ") + ` ORDER BY ` + order + ` LIMIT 1`
 	var id int64
 	err := s.Items.QueryRow(q, args...).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -521,7 +803,8 @@ func (s *Store) Get(id int64) (*Item, error) {
 		COALESCE(options,''), correct_index, COALESCE(explanation,''), COALESCE(answer_skeleton,''),
 		COALESCE(checklist,''), COALESCE(starter_code,''), COALESCE(reference_code,''),
 		COALESCE(review_criteria,''), COALESCE(language,''), COALESCE(times_asked,0), COALESCE(times_passed,0),
-		last_result, COALESCE(closed,0)
+		last_result, COALESCE(closed,0),
+		COALESCE(track,''), COALESCE(section,''), COALESCE(status,'')
 		FROM prep_items WHERE id = ?`, id)
 	item, err := scanItem(row)
 	if err != nil {
@@ -543,6 +826,7 @@ func scanItem(row scanner) (*Item, error) {
 		&it.ID, &it.ItemType, &it.Block, &it.Company, &it.Title, &it.Prompt, &options,
 		&correct, &it.Explanation, &it.AnswerSkeleton, &checklist, &it.StarterCode, &it.ReferenceCode,
 		&it.ReviewCriteria, &it.Language, &it.TimesAsked, &it.TimesPassed, &last, &closed,
+		&it.Track, &it.Section, &it.Status,
 	)
 	if err != nil {
 		return nil, err
@@ -551,7 +835,13 @@ func scanItem(row scanner) (*Item, error) {
 	if it.ItemType == "" {
 		it.ItemType = TypeFlashcard
 	}
-	it.BlockTitle = BlockTitle(it.Block)
+	if it.Section != "" {
+		it.BlockTitle = it.Section
+	} else if it.Track != "" {
+		it.BlockTitle = TrackTitle(it.Track)
+	} else {
+		it.BlockTitle = BlockTitle(it.Block)
+	}
 	it.Block = NormalizeBlock(it.Block)
 	it.Options = decodeList(options)
 	it.Checklist = decodeList(checklist)
@@ -621,9 +911,13 @@ func (s *Store) RecordAnswer(in AnswerInput) (AnswerResult, error) {
 		passedN++
 		last = 1
 	}
+	status := "retry"
+	if passed {
+		status = "done"
+	}
 	_, err = s.Items.Exec(`UPDATE prep_items
-		SET times_asked = ?, times_passed = ?, last_result = ?, updated_at = ?
-		WHERE id = ?`, times, passedN, last, time.Now().UTC().Format(time.RFC3339), item.ID)
+		SET times_asked = ?, times_passed = ?, last_result = ?, status = ?, updated_at = ?
+		WHERE id = ?`, times, passedN, last, status, time.Now().UTC().Format(time.RFC3339), item.ID)
 	if err != nil {
 		return AnswerResult{}, err
 	}
@@ -676,7 +970,7 @@ func (s *Store) MarkReview(item Item, passed bool, note string) error {
 	times := item.TimesAsked + 1
 	if passed {
 		_, err := s.Items.Exec(`UPDATE prep_items
-			SET times_asked = ?, times_passed = times_passed + 1, last_result = 1, closed = 1, updated_at = ?
+			SET times_asked = ?, times_passed = times_passed + 1, last_result = 1, closed = 1, status = 'done', updated_at = ?
 			WHERE id = ?`, times, time.Now().UTC().Format(time.RFC3339), item.ID)
 		if err != nil {
 			return err
@@ -687,7 +981,7 @@ func (s *Store) MarkReview(item Item, passed bool, note string) error {
 		return s.ResolveHard(item.ID)
 	}
 	_, err := s.Items.Exec(`UPDATE prep_items
-		SET times_asked = ?, last_result = 0, updated_at = ?
+		SET times_asked = ?, last_result = 0, status = 'retry', updated_at = ?
 		WHERE id = ?`, times, time.Now().UTC().Format(time.RFC3339), item.ID)
 	if err != nil {
 		return err
@@ -760,7 +1054,8 @@ func (s *Store) Search(query string, limit int) (items []SearchHit, hard []Searc
 	}
 	words := queryWords(query)
 	rows, err := s.Items.Query(`SELECT id, COALESCE(item_type,''), COALESCE(block,''), COALESCE(company,''),
-		COALESCE(title,''), COALESCE(prompt,''), COALESCE(explanation,''), COALESCE(answer_skeleton,'')
+		COALESCE(title,''), COALESCE(prompt,''), COALESCE(explanation,''), COALESCE(answer_skeleton,''),
+		COALESCE(theory,''), COALESCE(answer,''), COALESCE(section,''), COALESCE(track,'')
 		FROM prep_items`)
 	if err != nil {
 		return nil, nil, err
@@ -769,11 +1064,11 @@ func (s *Store) Search(query string, limit int) (items []SearchHit, hard []Searc
 	var itemHits []SearchHit
 	for rows.Next() {
 		var id int64
-		var itemType, block, company, title, prompt, explanation, skeleton string
-		if err := rows.Scan(&id, &itemType, &block, &company, &title, &prompt, &explanation, &skeleton); err != nil {
+		var itemType, block, company, title, prompt, explanation, skeleton, theory, answer, section, track string
+		if err := rows.Scan(&id, &itemType, &block, &company, &title, &prompt, &explanation, &skeleton, &theory, &answer, &section, &track); err != nil {
 			return nil, nil, err
 		}
-		hay := strings.Join([]string{title, prompt, explanation, skeleton, company, block}, "\n")
+		hay := strings.Join([]string{title, prompt, explanation, skeleton, theory, answer, section, track, company, block}, "\n")
 		score := scoreHay(hay, words)
 		if score == 0 {
 			continue

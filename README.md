@@ -2,7 +2,7 @@
 
 Локальный тренажёр к собеседованиям: Flutter (телефон и широкий Web) и один Go-сервер. Карточки квизов, открытых вопросов и кодовых задач читаются из SQLite. Код на ревью уходит в OpenRouter, локальной песочницы компиляции нет.
 
-Содержимое базы в репозиторий не входит. Его можно положить в файлы позже: сервер создаёт схему и добавляет недостающие колонки, уже загруженные строки не удаляет.
+Исходный дамп лежит в `prep_app/data/prep_app_knowledge_export.json` и читаемой книгой в `prep_app/data/prep_app_knowledge_base.md`. При старте сервер ищет `/home/shaman/prep_app_knowledge_export.json` (или `KNOWLEDGE_JSON`) и обновляет карточки. Повторный импорт не сбрасывает прогресс: `times_asked`, `last_result`, `closed`, `status`.
 
 ## Запуск
 
@@ -25,7 +25,10 @@ export OPENROUTER_MODEL=openai/gpt-4o-mini
 
 Таблица `prep_items` в базе вопросов. Полный DDL — `prep_app/backend/schema.sql`.
 
+Утренний спринт берёт одну дорожку по протоколу: чётный день — секции компаний, нечётный — алгоритмические паттерны (код), воскресенье — system design или легенда.
+
 - `item_type`: `quiz`, `flashcard` или `code`
+- `track`: `dumps`, `patterns`, `system_design`, `legend`; вопросы библиотеки — `library`, разобранные концепты — `concept`
 - `block`: `go`, `db_kafka`, `algo`, `system_design` (понимаются и короткие алиасы вроде `kafka`, `postgres`, `sd`)
 - `quiz`: `options` — JSON-массив строк, `correct_index`, `explanation`
 - `flashcard`: `answer_skeleton`, `checklist` — JSON-массив тезисов
