@@ -27,6 +27,7 @@ class _TrainerScreenState extends State<TrainerScreen> {
   int? _selected;
   AnswerOutcome? _outcome;
   ReviewVerdict? _verdict;
+  String? _reviewError;
   String _code = '';
 
   @override
@@ -73,6 +74,7 @@ class _TrainerScreenState extends State<TrainerScreen> {
     _selected = null;
     _outcome = null;
     _verdict = null;
+    _reviewError = null;
     _code = item?.starterCode ?? '';
     _busy = false;
   }
@@ -179,7 +181,7 @@ class _TrainerScreenState extends State<TrainerScreen> {
     setState(() {
       _busy = true;
       _verdict = null;
-      _error = null;
+      _reviewError = null;
     });
     try {
       final verdict = await widget.api.review(questionId: item.id, code: _code);
@@ -190,8 +192,10 @@ class _TrainerScreenState extends State<TrainerScreen> {
       });
     } on ApiException catch (e) {
       if (!mounted) return;
-      setState(() => _busy = false);
-      _toast(e.message);
+      setState(() {
+        _busy = false;
+        _reviewError = e.message;
+      });
     }
   }
 
@@ -486,6 +490,13 @@ class _TrainerScreenState extends State<TrainerScreen> {
                       ),
                     ),
                     const SizedBox(height: 10),
+                    if (_reviewError != null) ...[
+                      Text(
+                        _reviewError!,
+                        style: const TextStyle(color: AppColors.bad),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     Row(
                       children: [
                         FilledButton(

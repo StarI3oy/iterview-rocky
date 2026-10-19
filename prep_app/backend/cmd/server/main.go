@@ -51,8 +51,10 @@ func main() {
 		}
 	}
 
-	completer := ai.New(os.Getenv("OPENROUTER_API_KEY"), os.Getenv("OPENROUTER_MODEL"))
-	if completer == nil {
+	var completer httpapi.Completer
+	if c := ai.New(os.Getenv("OPENROUTER_API_KEY"), os.Getenv("OPENROUTER_MODEL")); c != nil {
+		completer = c
+	} else {
 		log.Printf("OPENROUTER_API_KEY не задан — ревью и пояснение поиска недоступны, поиск по базе работает")
 	}
 
