@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -87,6 +88,7 @@ type conceptSrc struct {
 
 type cardRow struct {
 	ID             int64
+	SourceKey      string
 	ItemType       string
 	Block          string
 	Company        string
@@ -221,39 +223,49 @@ func (s *Store) ImportKnowledge(path string) (int, error) {
 	return n, nil
 }
 
-func upsertCard(tx *sql.Tx, row cardRow) error {
-	_, err := tx.Exec(`INSERT INTO prep_items (
-		id, item_type, block, company, title, prompt, explanation, answer_skeleton, checklist,
-		starter_code, reference_code, review_criteria, language, track, section, grade, difficulty,
-		question, theory, answer, source, source_url, slot, status, notes
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	ON CONFLICT(id) DO UPDATE SET
-		item_type = excluded.item_type,
-		block = excluded.block,
-		company = excluded.company,
-		title = excluded.title,
-		prompt = excluded.prompt,
-		explanation = excluded.explanation,
-		answer_skeleton = excluded.answer_skeleton,
-		checklist = excluded.checklist,
-		starter_code = excluded.starter_code,
-		reference_code = excluded.reference_code,
-		review_criteria = excluded.review_criteria,
-		language = excluded.language,
-		track = excluded.track,
-		section = excluded.section,
-		grade = excluded.grade,
-		difficulty = excluded.difficulty,
-		question = excluded.question,
-		theory = excluded.theory,
-		answer = excluded.answer,
-		source = excluded.source,
-		source_url = excluded.source_url,
-		slot = excluded.slot,
-		notes = excluded.notes`,
-		row.ID, row.ItemType, row.Block, row.Company, row.Title, row.Prompt, row.Explanation, row.AnswerSkeleton, row.Checklist,
+var cardColumns = []string{
+	"item_type", "block", "company", "title", "prompt", "explanation", "answer_skeleton", "checklist",
+	"starter_code", "reference_code", "review_criteria", "language", "track", "section", "grade", "difficulty",
+	"question", "theory", "answer", "source", "source_url", "slot", "notes",
+}
+
+func (row cardRow) values() []any {
+	return []any{
+		row.ItemType, row.Block, row.Company, row.Title, row.Prompt, row.Explanation, row.AnswerSkeleton, row.Checklist,
 		row.StarterCode, row.ReferenceCode, row.ReviewCriteria, row.Language, row.Track, row.Section, row.Grade, row.Difficulty,
-		row.Question, row.Theory, row.Answer, row.Source, row.SourceURL, row.Slot, row.Status, row.Notes)
+		row.Question, row.Theory, row.Answer, row.Source, row.SourceURL, row.Slot, row.Notes,
+	}
+}
+
+// upsertCard matches cards by source_key so foreign rows that share an id are never overwritten.
+// A new card keeps its preferred id when it is free, otherwise SQLite assigns one.
+// Progress columns (times_asked, last_result, closed, status) are only set on insert.
+func upsertCard(tx *sql.Tx, row cardRow) error {
+	var id int64
+	err := tx.QueryRow(`SELECT id FROM prep_items WHERE source_key = ?`, row.SourceKey).Scan(&id)
+	if err == nil {
+		sets := make([]string, len(cardColumns))
+		for i, c := range cardColumns {
+			sets[i] = c + " = ?"
+		}
+		_, err = tx.Exec(`UPDATE prep_items SET `+strings.Join(sets, ", ")+` WHERE id = ?`, append(row.values(), id)...)
+		return err
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	var taken int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM prep_items WHERE id = ?`, row.ID).Scan(&taken); err != nil {
+		return err
+	}
+	var preferred any
+	if taken == 0 {
+		preferred = row.ID
+	}
+	cols := append([]string{"id", "source_key", "status"}, cardColumns...)
+	args := append([]any{preferred, row.SourceKey, row.Status}, row.values()...)
+	marks := strings.TrimSuffix(strings.Repeat("?, ", len(cols)), ", ")
+	_, err = tx.Exec(`INSERT INTO prep_items (`+strings.Join(cols, ", ")+`) VALUES (`+marks+`)`, args...)
 	return err
 }
 
@@ -268,6 +280,7 @@ func projectPrep(it prepSrc) cardRow {
 	}
 	row := cardRow{
 		ID:          it.ID,
+		SourceKey:   fmt.Sprintf("prep:%d", it.ID),
 		ItemType:    TypeFlashcard,
 		Block:       blockForPrep(it.Track, it.Section),
 		Company:     company,
@@ -316,6 +329,7 @@ func projectQuestion(q questionSrc) cardRow {
 	}
 	return cardRow{
 		ID:             questionIDBase + q.ID,
+		SourceKey:      fmt.Sprintf("q:%d", q.ID),
 		ItemType:       TypeFlashcard,
 		Block:          blockForTopic(q.Topic),
 		Company:        q.Topic,
@@ -344,6 +358,7 @@ func projectConcept(c conceptSrc) cardRow {
 	}
 	return cardRow{
 		ID:             conceptIDBase + c.ID,
+		SourceKey:      fmt.Sprintf("c:%d", c.ID),
 		ItemType:       TypeFlashcard,
 		Block:          "concept",
 		Company:        c.Topic,

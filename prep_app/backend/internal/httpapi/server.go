@@ -159,6 +159,10 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, errors.New("карточка не найдена"))
 		return
 	}
+	if errors.Is(err, store.ErrCodeNeedsReview) {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
