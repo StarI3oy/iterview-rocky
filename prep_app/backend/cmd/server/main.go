@@ -102,7 +102,11 @@ func knowledgePath() string {
 		"data/prep_app_knowledge_export.json",
 	}
 	if exe, err := os.Executable(); err == nil {
-		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "prep_app_knowledge_export.json"))
+		dir := filepath.Dir(exe)
+		candidates = append(candidates,
+			filepath.Join(dir, "prep_app_knowledge_export.json"),
+			filepath.Join(dir, "..", "data", "prep_app_knowledge_export.json"),
+		)
 	}
 	for _, p := range candidates {
 		info, err := os.Stat(p)

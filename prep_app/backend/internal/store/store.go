@@ -97,6 +97,18 @@ type HardConcept struct {
 type Store struct {
 	Items *sql.DB
 	Hard  *sql.DB
+	// Now overrides the clock in tests.
+	Now func() time.Time
+}
+
+// ErrCodeNeedsReview is returned when a code task is answered without AI review.
+var ErrCodeNeedsReview = errors.New("кодовая задача засчитывается только через ревью")
+
+func (s *Store) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }
 
 func Open(interviewPath, hardPath string) (*Store, error) {
@@ -207,11 +219,15 @@ func (s *Store) Migrate() error {
 		{"slot", "TEXT"},
 		{"status", "TEXT"},
 		{"notes", "TEXT"},
+		{"source_key", "TEXT"},
 	}
 	if err := ensureColumns(s.Items, "prep_items", adds); err != nil {
 		return err
 	}
 	if err := backfillItems(s.Items); err != nil {
+		return err
+	}
+	if err := backfillSourceKeys(s.Items); err != nil {
 		return err
 	}
 	if _, err := s.Items.Exec(`CREATE TABLE IF NOT EXISTS questions (
@@ -416,6 +432,26 @@ func backfillItems(db *sql.DB) error {
 	return err
 }
 
+// backfillSourceKeys tags rows imported before source_key existed, when ids were
+// derived from the export: prep_items as-is, questions and concepts with an offset.
+func backfillSourceKeys(db *sql.DB) error {
+	stmts := []string{
+		`UPDATE prep_items SET source_key = 'prep:' || id
+			WHERE source_key IS NULL AND track IN ('dumps','patterns','system_design','legend') AND id < 10000`,
+		`UPDATE prep_items SET source_key = 'q:' || (id - 10000)
+			WHERE source_key IS NULL AND track = 'library' AND id > 10000 AND id < 20000`,
+		`UPDATE prep_items SET source_key = 'c:' || (id - 20000)
+			WHERE source_key IS NULL AND track = 'concept' AND id > 20000`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS prep_items_source_key ON prep_items(source_key)`,
+	}
+	for _, q := range stmts {
+		if _, err := db.Exec(q); err != nil {
+			return fmt.Errorf("source_key: %w", err)
+		}
+	}
+	return nil
+}
+
 func TrackTitle(track string) string {
 	switch track {
 	case "dumps":
@@ -567,7 +603,7 @@ func (s *Store) barByTracks() (Bar, error) {
 	}
 	_ = s.Items.QueryRow(`SELECT COUNT(*) FROM prep_items WHERE track = 'concept'`).Scan(&bar.Studied)
 	_ = s.Items.QueryRow(`SELECT body FROM prep_protocol WHERE id = 1`).Scan(&bar.Protocol)
-	bar.TodayTrack = todayTrack(time.Now())
+	bar.TodayTrack = todayTrack(s.now())
 	bar.Today = TrackTitle(bar.TodayTrack)
 	if bar.TodayTrack == "system_design" {
 		bar.Today = "System Design или легенда"
@@ -597,14 +633,17 @@ func (s *Store) listTracker() ([]TrackerItem, error) {
 }
 
 func isMastered(itemType string, last sql.NullInt64, closed int, status string) bool {
-	if status == "done" || closed == 1 {
+	if closed == 1 {
 		return true
 	}
 	if itemType == TypeCode {
 		return false
 	}
-	return last.Valid && last.Int64 == 1
+	return status == "done" || (last.Valid && last.Int64 == 1)
 }
+
+// notMasteredSQL mirrors isMastered.
+const notMasteredSQL = `COALESCE(closed,0) = 0 AND (item_type = 'code' OR (COALESCE(status,'') <> 'done' AND COALESCE(last_result,0) <> 1))`
 
 func todayTrack(now time.Time) string {
 	if now.Weekday() == time.Sunday {
@@ -721,7 +760,11 @@ func (s *Store) Next(f FeedFilter) (*Item, error) {
 			where = append(where, "COALESCE(closed,0) = 0")
 		}
 	case f.Kind == "sprint" && s.hasCurriculum():
-		track := todayTrack(time.Now())
+		where = append(where, notMasteredSQL)
+		if f.Mode != "web" {
+			where = append(where, "item_type != 'code'")
+		}
+		track := todayTrack(s.now())
 		if track == "system_design" {
 			where = append(where, "track IN ('system_design','legend')")
 			order = `CASE track WHEN 'system_design' THEN 0 ELSE 1 END, ` + order
@@ -743,7 +786,10 @@ func (s *Store) Next(f FeedFilter) (*Item, error) {
 		return item, err
 	}
 	// Сегодняшняя дорожка закрыта — берём любую незакрытую карточку планки.
-	where = []string{"COALESCE(track,'') IN ('dumps','patterns','system_design','legend')", "COALESCE(last_result,0) <> 1", "COALESCE(closed,0) = 0"}
+	where = []string{"COALESCE(track,'') IN ('dumps','patterns','system_design','legend')", notMasteredSQL}
+	if f.Mode != "web" {
+		where = append(where, "item_type != 'code'")
+	}
 	args = []any{}
 	if f.SkipID > 0 {
 		where = append(where, "id != ?")
@@ -899,6 +945,9 @@ func (s *Store) RecordAnswer(in AnswerInput) (AnswerResult, error) {
 	item, err := s.Get(in.QuestionID)
 	if err != nil {
 		return AnswerResult{}, err
+	}
+	if item.ItemType == TypeCode {
+		return AnswerResult{}, ErrCodeNeedsReview
 	}
 	passed := in.Passed
 	if item.ItemType == TypeQuiz && in.SelectedIndex != nil && item.CorrectIndex != nil {
