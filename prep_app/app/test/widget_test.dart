@@ -1,5 +1,14 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:prep_app/api.dart';
 import 'package:prep_app/models.dart';
+import 'package:prep_app/screens/dashboard.dart';
+import 'package:prep_app/session.dart';
+import 'package:prep_app/theme.dart';
 
 void main() {
   test('quiz item parses options and does not require code', () {
@@ -50,4 +59,90 @@ void main() {
     });
     expect(hit.openId, 4);
   });
+
+  testWidgets('upload sends the file and shows how many cards landed', (
+    tester,
+  ) async {
+    final client = _ScriptClient();
+    final api = Api(client: client, base: 'http://test.local');
+    const payload =
+        '{"questions":[{"id":8,"question":"Что такое GMP?","answer":"G, M и P"}]}';
+    tester.view.physicalSize = const Size(400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTheme(),
+        home: Scaffold(
+          body: DashboardScreen(
+            api: api,
+            session: Session(),
+            pickFile: () async =>
+                (bytes: utf8.encode(payload), name: 'questions.json'),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 20));
+
+    final button = find.text('Загрузить файл');
+    expect(button, findsOneWidget);
+    await tester.ensureVisible(button);
+    await tester.pump();
+    await tester.tap(button);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.textContaining('В базу записано карточек: 1'), findsOneWidget);
+    expect(find.textContaining('вопросов 1'), findsOneWidget);
+    expect(client.importBody, contains('questions.json'));
+    expect(client.importBody, contains('Что такое GMP?'));
+  });
+}
+
+class _ScriptClient extends http.BaseClient {
+  String importBody = '';
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final bytes = await request.finalize().toBytes();
+    final path = request.url.path;
+    if (path == '/api/import') {
+      importBody = utf8.decode(bytes);
+      return _json(200, {
+        'ok': true,
+        'imported': 1,
+        'questions': 1,
+        'prep_items': 0,
+        'concepts': 0,
+        'tracker': 0,
+      });
+    }
+    if (path == '/api/bar') {
+      return _json(200, {
+        'overall_percent': 0,
+        'done': 0,
+        'total': 0,
+        'empty': true,
+        'blocks': [
+          {'id': 'go', 'title': 'Go', 'percent': 0, 'done': 0, 'total': 0},
+        ],
+      });
+    }
+    if (path == '/api/queue' || path == '/api/hard') {
+      return _json(200, {'items': []});
+    }
+    return _json(404, {'error': 'нет маршрута'});
+  }
+
+  http.StreamedResponse _json(int status, Object body) {
+    return http.StreamedResponse(
+      Stream.value(utf8.encode(jsonEncode(body))),
+      status,
+      headers: const {'content-type': 'application/json; charset=utf-8'},
+    );
+  }
 }

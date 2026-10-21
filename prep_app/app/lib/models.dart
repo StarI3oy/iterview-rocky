@@ -1,3 +1,29 @@
+class ImportStats {
+  const ImportStats({
+    required this.cards,
+    required this.questions,
+    required this.prepItems,
+    required this.concepts,
+    required this.tracker,
+  });
+
+  final int cards;
+  final int questions;
+  final int prepItems;
+  final int concepts;
+  final int tracker;
+
+  factory ImportStats.fromJson(Map<String, dynamic> j) {
+    return ImportStats(
+      cards: asInt(j['imported']),
+      questions: asInt(j['questions']),
+      prepItems: asInt(j['prep_items']),
+      concepts: asInt(j['concepts']),
+      tracker: asInt(j['tracker']),
+    );
+  }
+}
+
 int asInt(dynamic v, [int fallback = 0]) {
   if (v is int) return v;
   if (v is num) return v.toInt();

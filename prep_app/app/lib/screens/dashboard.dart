@@ -1,3 +1,6 @@
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
@@ -6,10 +9,18 @@ import '../session.dart';
 import '../theme.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key, required this.api, required this.session});
+  const DashboardScreen({
+    super.key,
+    required this.api,
+    required this.session,
+    this.pickFile,
+  });
 
   final Api api;
   final Session session;
+
+  /// When set, tests supply a file without opening the system dialog.
+  final Future<({Uint8List bytes, String name})?> Function()? pickFile;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -21,6 +32,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<HardConcept> _hard = const [];
   String? _error;
   bool _loading = true;
+  bool _importing = false;
 
   @override
   void initState() {
@@ -53,6 +65,58 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _loading = false;
       });
     }
+  }
+
+  Future<void> _importFile() async {
+    final picked = widget.pickFile != null
+        ? await widget.pickFile!()
+        : await _pickFromDisk();
+    if (picked == null || !mounted) return;
+    final bytes = picked.bytes;
+    final name = picked.name;
+    setState(() => _importing = true);
+    try {
+      final stats = await widget.api.importFile(bytes, name);
+      if (!mounted) return;
+      await _load();
+      if (!mounted) return;
+      final extra = [
+        if (stats.questions > 0) 'вопросов ${stats.questions}',
+        if (stats.prepItems > 0) 'карточек подготовки ${stats.prepItems}',
+        if (stats.concepts > 0) 'концептов ${stats.concepts}',
+      ].join(', ');
+      _toast(
+        extra.isEmpty
+            ? 'В базу записано карточек: ${stats.cards}'
+            : 'В базу записано карточек: ${stats.cards} ($extra)',
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      _toast(e.message);
+    } finally {
+      if (mounted) setState(() => _importing = false);
+    }
+  }
+
+  Future<({Uint8List bytes, String name})?> _pickFromDisk() async {
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['json', 'sql', 'txt'],
+      withData: true,
+    );
+    if (picked == null || picked.files.isEmpty) return null;
+    final file = picked.files.single;
+    final bytes = file.bytes;
+    if (bytes == null) {
+      _toast('Не удалось прочитать файл');
+      return null;
+    }
+    return (bytes: bytes, name: file.name);
+  }
+
+  void _toast(String message) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -102,6 +166,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             )
           else if (_bar != null) ...[
             _Summary(bar: _bar!),
+            const SizedBox(height: 14),
+            _ImportPanel(importing: _importing, onImport: _importFile),
             const SizedBox(height: 14),
             _Blocks(bar: _bar!),
             const SizedBox(height: 18),
@@ -211,6 +277,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
             ],
           ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ImportPanel extends StatelessWidget {
+  const _ImportPanel({required this.importing, required this.onImport});
+
+  final bool importing;
+  final VoidCallback onImport;
+
+  @override
+  Widget build(BuildContext context) {
+    return Panel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Пополнить базу',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'JSON-экспорт, SQL-дамп (.sql) или текстовый дамп (.txt). Повторная загрузка обновляет карточки и не сбрасывает прогресс тренировок.',
+            style: TextStyle(color: AppColors.muted, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: importing ? null : onImport,
+            icon: importing
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.upload_file),
+            label: Text(importing ? 'Загрузка…' : 'Загрузить файл'),
+          ),
         ],
       ),
     );

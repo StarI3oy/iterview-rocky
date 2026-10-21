@@ -115,16 +115,25 @@ type cardRow struct {
 	Notes          string
 }
 
+// ImportFromJSON imports a knowledge export or a bare array of questions.
+func (s *Store) ImportFromJSON(data []byte) (int, error) {
+	doc, err := decodeKnowledge(data)
+	if err != nil {
+		return 0, err
+	}
+	return s.importKnowledgeFile(doc)
+}
+
 // ImportKnowledge upserts the exported curriculum. Progress columns stay as they are.
 func (s *Store) ImportKnowledge(path string) (int, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return 0, err
 	}
-	var doc knowledgeFile
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return 0, fmt.Errorf("json: %w", err)
-	}
+	return s.ImportFromJSON(raw)
+}
+
+func (s *Store) importKnowledgeFile(doc knowledgeFile) (int, error) {
 	tx, err := s.Items.Begin()
 	if err != nil {
 		return 0, err

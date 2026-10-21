@@ -108,6 +108,39 @@ class Api {
     await _post('/api/queue', {'question_id': questionId});
   }
 
+  Future<ImportStats> importFile(Uint8List bytes, String filename) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$base/api/import'));
+    req.files.add(
+      http.MultipartFile.fromBytes('file', bytes, filename: filename),
+    );
+    try {
+      final streamed = await client
+          .send(req)
+          .timeout(const Duration(seconds: 60));
+      final res = await http.Response.fromStream(streamed);
+      final dynamic decoded = res.body.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(res.body);
+      final map = asMap(decoded);
+      if (res.statusCode >= 400) {
+        final message = map['error']?.toString();
+        throw ApiException(
+          message == null || message.isEmpty
+              ? 'Ошибка ${res.statusCode}'
+              : message,
+          res.statusCode,
+        );
+      }
+      return ImportStats.fromJson(map);
+    } on ApiException {
+      rethrow;
+    } on TimeoutException {
+      throw ApiException('Сервер не ответил вовремя');
+    } catch (e) {
+      throw ApiException('Нет связи с API');
+    }
+  }
+
   Future<Map<String, dynamic>> _get(String path, [Map<String, String>? query]) {
     final uri = Uri.parse('$base$path').replace(queryParameters: query);
     return _send(client.get(uri));
