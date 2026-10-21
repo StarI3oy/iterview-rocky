@@ -23,6 +23,8 @@ type Completer interface {
 type Server struct {
 	Store          *store.Store
 	Completer      Completer
+	Models         ModelDirectory
+	Selection      *ai.Selection
 	WebDir         string
 	Guard          *auth.Guard
 	AllowedOrigins []string
@@ -32,6 +34,10 @@ type Server struct {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.health)
+	mux.HandleFunc("GET /api/settings/model", s.modelSettings)
+	mux.HandleFunc("POST /api/settings/model", s.saveModel)
+	mux.HandleFunc("POST /api/settings/model/reset", s.resetModel)
+	mux.HandleFunc("GET /api/models", s.modelSearch)
 	mux.HandleFunc("GET /api/auth/status", s.authStatus)
 	mux.HandleFunc("POST /api/auth/login", s.authLogin)
 	mux.HandleFunc("POST /api/auth/setup", s.authSetup)

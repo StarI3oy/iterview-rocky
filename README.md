@@ -14,6 +14,8 @@ export OPENROUTER_MODEL=openai/gpt-4o-mini
 ./prep_app/run.sh
 ```
 
+`OPENROUTER_MODEL` — модель по умолчанию. Выбор в настройках тренажёра (поиск по каталогу OpenRouter и конкретный поставщик) пишется в `prep_settings.json` рядом с базой и действует без перезапуска. Сброс в настройках возвращает переменную окружения. Ключ остаётся только в `OPENROUTER_API_KEY`.
+
 Сервер слушает `:8080` и отдаёт API вместе со статикой `prep_app/app/build/web`. С телефона в той же сети откройте `http://<ip-компьютера>:8080`. Узкая ширина (меньше 768px) — мобильный режим, широкая — две панели для кода.
 
 Пока пароль не задан, API с других устройств закрыт. На компьютере, где запущен сервер, первый экран просит пароль и сохраняет только Argon2id-хеш в `prep_auth.json` рядом с базой вопросов. Карточки, прогресс и `OPENROUTER_API_KEY` при этом не меняются. Дальше вход нужен и с этого компьютера, и с телефона. Подробности — в [RUNBOOK.md](RUNBOOK.md#пароль).
@@ -56,3 +58,7 @@ APK и IPA публикуются как GitHub Release по тегу `v1.2.3`. 
 - `POST /api/review` — `{question_id, code}` → `{passed, score, bugs, style_notes, follow_up_question}`
 - `POST /api/search` — `{query}` ищет по вопросам и незакрытым hard concepts, при наличии ключа добавляет короткое пояснение
 - `POST /api/queue` — отложить кодовую задачу с телефона
+- `GET /api/settings/model` — текущая модель, поставщик и источник (`env` или `settings`)
+- `GET /api/models?q=` — поиск текстовых моделей OpenRouter: поставщики, сбор данных, полная цена, задержка, доступность, бенчмарк Artificial Analysis
+- `POST /api/settings/model` — `{model, provider}` закрепляет модель и, если `provider` не пустой, только этого поставщика
+- `POST /api/settings/model/reset` — удаляет выбор и возвращает `OPENROUTER_MODEL`

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:prep_app/model_catalog.dart';
 import 'package:prep_app/models.dart';
 
 void main() {
@@ -49,5 +50,44 @@ void main() {
       'snippet': 'паника',
     });
     expect(hit.openId, 4);
+  });
+
+  test('model search keeps provider price, privacy and benchmark', () {
+    final page = CatalogPage.fromJson({
+      'query': 'haiku',
+      'match_count': 1,
+      'truncated': false,
+      'latency_needs_key': false,
+      'data_policy_loaded': true,
+      'results': [
+        {
+          'id': 'anthropic/claude-haiku',
+          'name': 'Claude Haiku',
+          'intelligence_index': 43.4,
+          'benchmark_lines': ['Интеллект 43.4'],
+          'benchmark_note': 'Artificial Analysis',
+          'price_hint': 'вход от \$0.15 / 1M',
+          'providers': [
+            {
+              'name': 'Anthropic',
+              'tag': 'anthropic',
+              'availability': 'доступен',
+              'collects_data': true,
+              'data_line': 'Собирает данные: хранит промпты 30 дн.',
+              'latency_line': 'До первого токена за 30 мин: p50 650 мс',
+              'pricing_lines': ['Вход: \$0.15 за 1M токенов'],
+              'uptime_line': 'Доступность: 30 мин 99.5%',
+            },
+          ],
+        },
+      ],
+    });
+    final model = page.results.single;
+    final provider = model.providers.single;
+    expect(model.intelligenceIndex, 43.4);
+    expect(provider.collectsData, isTrue);
+    expect(provider.pricingLines.single, contains('0.15'));
+    expect(provider.latencyLine, contains('650'));
+    expect(provider.availability, 'доступен');
   });
 }

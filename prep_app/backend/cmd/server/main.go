@@ -85,12 +85,30 @@ func main() {
 		}
 	}
 
+	settingsPath := os.Getenv("PREP_SETTINGS_FILE")
+	if settingsPath == "" {
+		settingsPath = filepath.Join(filepath.Dir(absInterview), "prep_settings.json")
+	}
+	absSettings, _ := filepath.Abs(settingsPath)
+	selection, err := ai.OpenSelection(absSettings, os.Getenv("OPENROUTER_MODEL"))
+	if err != nil {
+		log.Fatalf("settings: %v", err)
+	}
+	current := selection.Current()
+	if current.Provider == "" {
+		log.Printf("модель: %s, поставщик выбирает OpenRouter (%s)", current.Model, current.Source)
+	} else {
+		log.Printf("модель: %s, поставщик %s (%s)", current.Model, current.Provider, current.Source)
+	}
+	log.Printf("файл выбора модели: %s", absSettings)
+
 	var completer httpapi.Completer
-	if c := ai.New(os.Getenv("OPENROUTER_API_KEY"), os.Getenv("OPENROUTER_MODEL")); c != nil {
+	if c := ai.New(os.Getenv("OPENROUTER_API_KEY"), selection); c != nil {
 		completer = c
 	} else {
-		log.Printf("OPENROUTER_API_KEY не задан — ревью и пояснение поиска недоступны, поиск по базе работает")
+		log.Printf("OPENROUTER_API_KEY не задан — ревью и пояснение поиска недоступны, поиск моделей и базы работает")
 	}
+	directory := ai.NewDirectory(os.Getenv("OPENROUTER_API_KEY"))
 
 	trustProxy := os.Getenv("PREP_TRUST_PROXY") == "1"
 	srv := &http.Server{
@@ -98,6 +116,8 @@ func main() {
 		Handler: (&httpapi.Server{
 			Store:          st,
 			Completer:      completer,
+			Models:         directory,
+			Selection:      selection,
 			WebDir:         web,
 			Guard:          guard,
 			AllowedOrigins: splitCSV(os.Getenv("PREP_ALLOWED_ORIGINS")),
