@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -111,6 +112,47 @@ func TestAPI(t *testing.T) {
 	}
 	if found["explanation"] != "кто закрывает?" && found["explanation"] == "" {
 		t.Fatalf("explanation %#v", found["explanation"])
+	}
+}
+
+func TestImportEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "i.db"), filepath.Join(dir, "h.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ts := httptest.NewServer((&Server{Store: st}).Handler())
+	defer ts.Close()
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	part, err := w.CreateFormFile("file", "questions.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write([]byte(`{"questions":[{"id":8,"topic":"Go","category":"Runtime","question":"Что такое GMP?","answer":"G, M и P","grade":"Middle","difficulty":3,"source":"notes"}]}`))
+	_ = w.Close()
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/import", &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || body["imported"] != float64(1) || body["questions"] != float64(1) {
+		t.Fatalf("import %d %#v", resp.StatusCode, body)
+	}
+	item, err := st.Get(10008)
+	if err != nil || item.Prompt != "Что такое GMP?" {
+		t.Fatalf("%+v %v", item, err)
 	}
 }
 

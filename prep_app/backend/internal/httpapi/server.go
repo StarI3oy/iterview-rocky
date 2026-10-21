@@ -46,6 +46,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/review", s.review)
 	mux.HandleFunc("POST /api/search", s.search)
 	mux.HandleFunc("POST /api/queue", s.enqueue)
+	mux.HandleFunc("POST /api/import", s.importData)
+	mux.HandleFunc("POST /api/import/preview", s.importData)
 	if s.WebDir != "" {
 		mux.Handle("/", spaHandler(s.WebDir))
 	}
@@ -347,6 +349,60 @@ func (s *Server) enqueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) importData(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeErr(w, http.StatusBadRequest, errors.New("не удалось прочитать файл"))
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, errors.New("файл не найден в запросе"))
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, errors.New("не удалось прочитать файл"))
+		return
+	}
+
+	preview := strings.HasSuffix(r.URL.Path, "/preview")
+	var stats store.ImportStats
+	if preview {
+		stats, err = s.Store.PreviewUpload(data)
+	} else {
+		stats, err = s.Store.ImportUpload(data)
+	}
+	if err != nil {
+		log.Printf("import %s: %v", header.Filename, err)
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	issues := stats.Issues
+	if issues == nil {
+		issues = []store.ImportIssue{}
+	}
+	previewRows := stats.Preview
+	if previewRows == nil {
+		previewRows = []store.ImportPreview{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         !stats.Rejected && (preview || stats.Cards > 0),
+		"rejected":   stats.Rejected,
+		"imported":   stats.Cards,
+		"questions":  stats.Questions,
+		"prep_items": stats.PrepItems,
+		"concepts":   stats.Concepts,
+		"tracker":    stats.Tracker,
+		"issues":     issues,
+		"preview":    previewRows,
+		"filename":   header.Filename,
+	})
 }
 
 func decode(r *http.Request, dst any) error {

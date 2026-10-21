@@ -157,6 +157,54 @@ class Api {
     await _post('/api/queue', {'question_id': questionId});
   }
 
+  Future<ImportStats> previewFile(Uint8List bytes, String filename) {
+    return _upload('/api/import/preview', bytes, filename);
+  }
+
+  Future<ImportStats> importFile(Uint8List bytes, String filename) {
+    return _upload('/api/import', bytes, filename);
+  }
+
+  Future<ImportStats> _upload(
+    String path,
+    Uint8List bytes,
+    String filename,
+  ) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$base$path'));
+    req.headers.addAll(_headers());
+    req.files.add(
+      http.MultipartFile.fromBytes('file', bytes, filename: filename),
+    );
+    try {
+      final streamed = await client
+          .send(req)
+          .timeout(const Duration(seconds: 60));
+      final res = await http.Response.fromStream(streamed);
+      final dynamic decoded = res.body.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(res.body);
+      final map = asMap(decoded);
+      if (res.statusCode >= 400) {
+        final message = map['error']?.toString();
+        final text = message == null || message.isEmpty
+            ? 'Ошибка ${res.statusCode}'
+            : message;
+        if (res.statusCode == 401 && text != 'неверный пароль') {
+          token = null;
+          onUnauthorized?.call();
+        }
+        throw ApiException(text, res.statusCode);
+      }
+      return ImportStats.fromJson(map);
+    } on ApiException {
+      rethrow;
+    } on TimeoutException {
+      throw ApiException('Сервер не ответил вовремя');
+    } catch (e) {
+      throw ApiException('Нет связи с API');
+    }
+  }
+
   Map<String, String> _headers({bool json = false}) {
     return {
       if (json) 'Content-Type': 'application/json',
