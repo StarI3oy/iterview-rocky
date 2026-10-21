@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,11 +127,13 @@ func Open(interviewPath, hardPath string) (*Store, error) {
 		_ = s.Close()
 		return nil, err
 	}
+	tightenDB(interviewPath)
+	tightenDB(hardPath)
 	return s, nil
 }
 
 func openSQLite(path string) (*sql.DB, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
 	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
@@ -143,7 +146,22 @@ func openSQLite(path string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	tightenDB(path)
 	return db, nil
+}
+
+// tightenDB keeps the sqlite files readable only by the operator.
+// It does not rewrite the database.
+func tightenDB(path string) {
+	if path == "" || strings.Contains(path, ":memory:") {
+		return
+	}
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		err := os.Chmod(path+suffix, 0o600)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			log.Printf("права %s: %v", path+suffix, err)
+		}
+	}
 }
 
 func (s *Store) Close() error {

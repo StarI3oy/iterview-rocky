@@ -4,6 +4,10 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Пусто — release подписывается debug-ключом, APK можно поставить на устройство.
+// CI задаёт путь, когда в секретах есть свой keystore.
+val releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+
 android {
     namespace = "com.example.prep_app"
     compileSdk = flutter.compileSdkVersion
@@ -29,11 +33,25 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (!releaseKeystorePath.isNullOrBlank()) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+                    ?: System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (releaseKeystorePath.isNullOrBlank()) {
+                signingConfigs.getByName("debug")
+            } else {
+                signingConfigs.getByName("release")
+            }
         }
     }
 }

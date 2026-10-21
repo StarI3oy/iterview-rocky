@@ -4,15 +4,18 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"prepapp/internal/ai"
+	"prepapp/internal/auth"
 	"prepapp/internal/httpapi"
 	"prepapp/internal/store"
 )
@@ -22,6 +25,7 @@ func main() {
 	interviewDB := flag.String("interview-db", env("INTERVIEW_DB", "/home/shaman/interview_questions.db"), "path to interview sqlite")
 	hardDB := flag.String("hard-db", env("HARD_CONCEPTS_DB", "/home/shaman/hard_concepts.db"), "path to hard concepts sqlite")
 	webDir := flag.String("web", env("WEB_DIR", ""), "Flutter web build directory")
+	authFile := flag.String("auth-file", env("PREP_AUTH_FILE", ""), "argon2id password file, separate from the databases")
 	flag.Parse()
 
 	absInterview, _ := filepath.Abs(*interviewDB)
@@ -32,6 +36,28 @@ func main() {
 		log.Fatalf("db: %v", err)
 	}
 	defer st.Close()
+
+	authPath := *authFile
+	if authPath == "" {
+		authPath = filepath.Join(filepath.Dir(absInterview), "prep_auth.json")
+	}
+	absAuth, _ := filepath.Abs(authPath)
+	guard, err := auth.Open(absAuth, auth.RecommendedParams())
+	if err != nil {
+		log.Fatalf("auth: %v", err)
+	}
+	message, err := auth.ApplyEnv(guard, os.Getenv("PREP_PASSWORD"), os.Getenv("PREP_PASSWORD_RESET") == "1")
+	if err != nil {
+		log.Fatalf("auth: %v", err)
+	}
+	log.Printf("auth file: %s", absAuth)
+	log.Printf("%s", message)
+
+	certFile := os.Getenv("PREP_TLS_CERT")
+	keyFile := os.Getenv("PREP_TLS_KEY")
+	if err := checkTLS(certFile, keyFile); err != nil {
+		log.Fatalf("tls: %v", err)
+	}
 
 	if knowledge := knowledgePath(); knowledge != "" {
 		n, err := st.ImportKnowledge(knowledge)
@@ -66,21 +92,38 @@ func main() {
 		log.Printf("OPENROUTER_API_KEY не задан — ревью и пояснение поиска недоступны, поиск по базе работает")
 	}
 
+	trustProxy := os.Getenv("PREP_TRUST_PROXY") == "1"
 	srv := &http.Server{
-		Addr:              *addr,
-		Handler:           (&httpapi.Server{Store: st, Completer: completer, WebDir: web}).Handler(),
+		Addr: *addr,
+		Handler: (&httpapi.Server{
+			Store:          st,
+			Completer:      completer,
+			WebDir:         web,
+			Guard:          guard,
+			AllowedOrigins: splitCSV(os.Getenv("PREP_ALLOWED_ORIGINS")),
+			TrustProxy:     trustProxy,
+		}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      90 * time.Second,
 		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	go func() {
-		log.Printf("listening on %s", *addr)
 		log.Printf("interview db: %s", absInterview)
 		log.Printf("hard concepts db: %s", absHard)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("serve: %v", err)
+		var serveErr error
+		if certFile != "" {
+			log.Printf("listening with TLS on %s", *addr)
+			serveErr = srv.ListenAndServeTLS(certFile, keyFile)
+		} else {
+			log.Printf("listening on %s", *addr)
+			log.Printf("TLS выключен: пароль по сети идёт открытым текстом. Для шифрования задайте PREP_TLS_CERT и PREP_TLS_KEY")
+			serveErr = srv.ListenAndServe()
+		}
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			log.Fatalf("serve: %v", serveErr)
 		}
 	}()
 
@@ -122,4 +165,46 @@ func env(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func splitCSV(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func checkTLS(certFile, keyFile string) error {
+	if certFile == "" && keyFile == "" {
+		return nil
+	}
+	if certFile == "" || keyFile == "" {
+		return errors.New("нужны оба файла PREP_TLS_CERT и PREP_TLS_KEY. Сервер не запущен, базы и ключи не изменены")
+	}
+	if err := realFile(certFile); err != nil {
+		return fmt.Errorf("PREP_TLS_CERT: %w. Сервер не запущен, базы и ключи не изменены", err)
+	}
+	if err := realFile(keyFile); err != nil {
+		return fmt.Errorf("PREP_TLS_KEY: %w. Сервер не запущен, базы и ключи не изменены", err)
+	}
+	return nil
+}
+
+func realFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return errors.New("это каталог, нужен файл")
+	}
+	return nil
 }

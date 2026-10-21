@@ -100,11 +100,13 @@ void main() {
     expect(find.textContaining('вопросов 1'), findsOneWidget);
     expect(client.importBody, contains('questions.json'));
     expect(client.importBody, contains('Что такое GMP?'));
+    expect(client.importClient, '1');
   });
 }
 
 class _ScriptClient extends http.BaseClient {
   String importBody = '';
+  String importClient = '';
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
@@ -112,6 +114,7 @@ class _ScriptClient extends http.BaseClient {
     final path = request.url.path;
     if (path == '/api/import') {
       importBody = utf8.decode(bytes);
+      importClient = request.headers['x-prep-client'] ?? '';
       return _json(200, {
         'ok': true,
         'imported': 1,
