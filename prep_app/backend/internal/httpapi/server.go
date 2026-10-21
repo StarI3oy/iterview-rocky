@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"prepapp/internal/ai"
+	"prepapp/internal/auth"
 	"prepapp/internal/store"
 )
 
@@ -20,14 +21,22 @@ type Completer interface {
 }
 
 type Server struct {
-	Store     *store.Store
-	Completer Completer
-	WebDir    string
+	Store          *store.Store
+	Completer      Completer
+	WebDir         string
+	Guard          *auth.Guard
+	AllowedOrigins []string
+	TrustProxy     bool
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.health)
+	mux.HandleFunc("GET /api/auth/status", s.authStatus)
+	mux.HandleFunc("POST /api/auth/login", s.authLogin)
+	mux.HandleFunc("POST /api/auth/setup", s.authSetup)
+	mux.HandleFunc("POST /api/auth/logout", s.authLogout)
+	mux.HandleFunc("POST /api/auth/password", s.authChangePassword)
 	mux.HandleFunc("GET /api/bar", s.bar)
 	mux.HandleFunc("GET /api/feed", s.feed)
 	mux.HandleFunc("GET /api/items/{id}", s.item)
@@ -40,7 +49,11 @@ func (s *Server) Handler() http.Handler {
 	if s.WebDir != "" {
 		mux.Handle("/", spaHandler(s.WebDir))
 	}
-	return withCORS(logRequests(mux))
+	var h http.Handler = mux
+	h = protect(h, s.Guard)
+	h = withCORS(h, s.AllowedOrigins)
+	h = logRequests(h)
+	return withSecurity(h, s.TrustProxy)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -347,6 +360,7 @@ func decode(r *http.Request, dst any) error {
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
@@ -355,19 +369,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeErr(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
-}
-
-func withCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func logRequests(next http.Handler) http.Handler {

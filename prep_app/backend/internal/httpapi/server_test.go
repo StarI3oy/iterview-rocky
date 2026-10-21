@@ -55,8 +55,11 @@ func TestAPI(t *testing.T) {
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("cors %d", resp.StatusCode)
 	}
-	if resp.Header.Get("Access-Control-Allow-Origin") != "*" {
-		t.Fatal("missing cors")
+	if resp.Header.Get("Access-Control-Allow-Origin") != "" {
+		t.Fatal("wildcard cors")
+	}
+	if resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatal("missing nosniff")
 	}
 
 	status, body := post(t, ts.URL+"/api/answer", map[string]any{"question_id": 9, "passed": true})

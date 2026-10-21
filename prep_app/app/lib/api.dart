@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'http_client.dart';
 import 'models.dart';
 
 class ApiException implements Exception {
@@ -16,13 +17,22 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+class AuthStatus {
+  const AuthStatus({required this.passwordSet, required this.authenticated});
+
+  final bool passwordSet;
+  final bool authenticated;
+}
+
 class Api {
   Api({http.Client? client, String? base})
-    : client = client ?? http.Client(),
+    : client = client ?? createHttpClient(),
       base = (base ?? defaultBase()).replaceAll(RegExp(r'/+$'), '');
 
   final http.Client client;
   final String base;
+  String? token;
+  void Function()? onUnauthorized;
 
   static String defaultBase() {
     const fromEnv = String.fromEnvironment('API_BASE');
@@ -32,6 +42,45 @@ class Api {
       if (uri.hasScheme && uri.host.isNotEmpty) return uri.origin;
     }
     return 'http://127.0.0.1:8080';
+  }
+
+  Future<AuthStatus> authStatus() async {
+    final json = await _get('/api/auth/status');
+    return AuthStatus(
+      passwordSet: asBool(json['password_set']),
+      authenticated: asBool(json['authenticated']),
+    );
+  }
+
+  Future<void> login(String password) async {
+    final json = await _post('/api/auth/login', {'password': password});
+    final value = json['token']?.toString() ?? '';
+    token = value.isEmpty ? null : value;
+  }
+
+  Future<void> setupPassword(String password, String confirm) async {
+    await _post('/api/auth/setup', {'password': password, 'confirm': confirm});
+  }
+
+  Future<void> changePassword({
+    required String current,
+    required String password,
+    required String confirm,
+  }) async {
+    await _post('/api/auth/password', {
+      'current_password': current,
+      'password': password,
+      'confirm': confirm,
+    });
+    token = null;
+  }
+
+  Future<void> logout() async {
+    try {
+      await _post('/api/auth/logout', const {});
+    } finally {
+      token = null;
+    }
   }
 
   Future<bool> aiEnabled() async {
@@ -108,9 +157,17 @@ class Api {
     await _post('/api/queue', {'question_id': questionId});
   }
 
+  Map<String, String> _headers({bool json = false}) {
+    return {
+      if (json) 'Content-Type': 'application/json',
+      'X-Prep-Client': '1',
+      if (token != null && token!.isNotEmpty) 'Authorization': 'Bearer $token',
+    };
+  }
+
   Future<Map<String, dynamic>> _get(String path, [Map<String, String>? query]) {
     final uri = Uri.parse('$base$path').replace(queryParameters: query);
-    return _send(client.get(uri));
+    return _send(path, client.get(uri, headers: _headers()));
   }
 
   Future<Map<String, dynamic>> _post(
@@ -119,9 +176,10 @@ class Api {
     Duration timeout = const Duration(seconds: 20),
   }) {
     return _send(
+      path,
       client.post(
         Uri.parse('$base$path'),
-        headers: const {'Content-Type': 'application/json'},
+        headers: _headers(json: true),
         body: jsonEncode(body),
       ),
       timeout: timeout,
@@ -129,6 +187,7 @@ class Api {
   }
 
   Future<Map<String, dynamic>> _send(
+    String path,
     Future<http.Response> future, {
     Duration timeout = const Duration(seconds: 20),
   }) async {
@@ -140,12 +199,21 @@ class Api {
       final map = asMap(decoded);
       if (res.statusCode >= 400) {
         final message = map['error']?.toString();
-        throw ApiException(
-          message == null || message.isEmpty
-              ? 'Ошибка ${res.statusCode}'
-              : message,
-          res.statusCode,
-        );
+        final text = message == null || message.isEmpty
+            ? 'Ошибка ${res.statusCode}'
+            : message;
+        if (res.statusCode == 401 && text != 'неверный пароль') {
+          const quiet = {
+            '/api/auth/login',
+            '/api/auth/setup',
+            '/api/auth/status',
+          };
+          if (!quiet.contains(path)) {
+            token = null;
+            onUnauthorized?.call();
+          }
+        }
+        throw ApiException(text, res.statusCode);
       }
       return map;
     } on ApiException {

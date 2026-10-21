@@ -16,6 +16,8 @@ export OPENROUTER_MODEL=openai/gpt-4o-mini
 
 Сервер слушает `:8080` и отдаёт API вместе со статикой `prep_app/app/build/web`. С телефона в той же сети откройте `http://<ip-компьютера>:8080`. Узкая ширина (меньше 768px) — мобильный режим, широкая — две панели для кода.
 
+Пока пароль не задан, API с других устройств закрыт. На компьютере, где запущен сервер, первый экран просит пароль и сохраняет только Argon2id-хеш в `prep_auth.json` рядом с базой вопросов. Карточки, прогресс и `OPENROUTER_API_KEY` при этом не меняются. Дальше вход нужен и с этого компьютера, и с телефона. Подробности — в [RUNBOOK.md](RUNBOOK.md#пароль).
+
 Базы по умолчанию:
 
 - `INTERVIEW_DB=/home/shaman/interview_questions.db`
@@ -44,6 +46,10 @@ APK и IPA публикуются как GitHub Release по тегу `v1.2.3`. 
 
 ## API
 
+- `GET /api/auth/status` — задан ли пароль и есть ли сессия
+- `POST /api/auth/setup` — первый пароль, только с того же компьютера
+- `POST /api/auth/login` — `{password}` → сессия (cookie и bearer)
+- `POST /api/auth/logout`, `POST /api/auth/password` — выход и смена пароля
 - `GET /api/bar` — общий процент и 4 блока
 - `GET /api/feed?mode=mobile|web&kind=sprint|code|hard`
 - `POST /api/answer` — `{question_id, passed, user_answer, selected_index?}`. Для квиза вердикт считается по `selected_index`. Провал пишет строку в `hard_concepts`
