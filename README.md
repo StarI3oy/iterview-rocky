@@ -23,6 +23,8 @@ export OPENROUTER_MODEL=openai/gpt-4o-mini
 
 На телефоне как отдельное приложение: `flutter run --dart-define=API_BASE=http://<ip>:8080` из `prep_app/app`.
 
+APK и IPA собираются сами: GitHub Actions «Сборка телефона» на пуше в `main`, в pull request и по кнопке Run workflow. Локально то же самое делает `prep_app/scripts/build_mobile.sh`. Адрес сервера зашивается в сборку через `API_BASE`. Как поставить артефакт и куда положить сертификаты — в [RUNBOOK.md](RUNBOOK.md#сборка-телефона-и-ios).
+
 ## Контракт карточки
 
 Таблица `prep_items` в базе вопросов. Полный DDL — `prep_app/backend/schema.sql`.

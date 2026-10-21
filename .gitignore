@@ -4,6 +4,11 @@ prep_app/app/.dart_tool/
 prep_app/app/.flutter-plugins
 prep_app/app/.flutter-plugins-dependencies
 prep_app/app/build/
+prep_app/app/ios/Flutter/Signing.xcconfig
+*.jks
+*.keystore
+*.p12
+*.mobileprovision
 prep_app/app/.idea/
 prep_app/app/*.iml
 *.db
