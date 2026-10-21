@@ -14,3 +14,5 @@ prep_app/app/*.iml
 *.db
 *.db-shm
 *.db-wal
+prep_auth.json
+.prep_auth-*.tmp

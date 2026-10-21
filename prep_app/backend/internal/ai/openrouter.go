@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
+
+var bearerRE = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/-]+=*`)
 
 const defaultModel = "openai/gpt-4o-mini"
 
@@ -92,10 +95,10 @@ func (c *Client) Complete(ctx context.Context, system, user string) (string, err
 	}
 	var parsed chatResponse
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return "", fmt.Errorf("openrouter: %s", clip(string(raw), 300))
+		return "", fmt.Errorf("openrouter: %s", c.redact(clip(string(raw), 300)))
 	}
 	if parsed.Error != nil && parsed.Error.Message != "" {
-		return "", fmt.Errorf("openrouter: %s", parsed.Error.Message)
+		return "", fmt.Errorf("openrouter: %s", c.redact(parsed.Error.Message))
 	}
 	if resp.StatusCode >= 300 {
 		return "", fmt.Errorf("openrouter: http %d", resp.StatusCode)
@@ -104,6 +107,13 @@ func (c *Client) Complete(ctx context.Context, system, user string) (string, err
 		return "", fmt.Errorf("openrouter: empty completion")
 	}
 	return parsed.Choices[0].Message.Content, nil
+}
+
+func (c *Client) redact(s string) string {
+	if c != nil && c.Key != "" {
+		s = strings.ReplaceAll(s, c.Key, "[redacted]")
+	}
+	return bearerRE.ReplaceAllString(s, "Bearer [redacted]")
 }
 
 func clip(s string, n int) string {
