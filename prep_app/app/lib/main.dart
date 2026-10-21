@@ -5,6 +5,7 @@ import 'screens/dashboard.dart';
 import 'screens/import_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/search_screen.dart';
+import 'screens/settings_screen.dart';
 import 'screens/trainer.dart';
 import 'session.dart';
 import 'theme.dart';
@@ -140,7 +141,12 @@ class _PrepAppState extends State<PrepApp> {
                 session: widget.session,
               ),
               2 => SearchScreen(api: _api, session: widget.session),
-              _ => ImportScreen(
+              3 => ImportScreen(
+                api: _api,
+                onChangePassword: _changePassword,
+                onLogout: _logout,
+              ),
+              _ => SettingsScreen(
                 api: _api,
                 onChangePassword: _changePassword,
                 onLogout: _logout,
@@ -168,30 +174,23 @@ class _PrepAppState extends State<PrepApp> {
               bottomNavigationBar: NavigationBar(
                 backgroundColor: AppColors.surface,
                 indicatorColor: AppColors.surface2,
-                selectedIndex: widget.session.tab.clamp(0, 3),
+                selectedIndex: widget.session.tab.clamp(0, 4),
                 onDestinationSelected: (index) {
                   if (index == 0) widget.session.showHome();
                   if (index == 1) widget.session.openSprint();
                   if (index == 2) widget.session.showSearch();
                   if (index == 3) widget.session.showImport();
+                  if (index == 4) widget.session.showSettings();
                 },
                 destinations: const [
-                  NavigationDestination(
-                    icon: Icon(Icons.speed),
-                    label: 'Планка',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.bolt),
-                    label: 'Спринт',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Icons.search),
-                    label: 'Поиск',
-                  ),
+                  NavigationDestination(icon: Icon(Icons.speed), label: 'Планка'),
+                  NavigationDestination(icon: Icon(Icons.bolt), label: 'Спринт'),
+                  NavigationDestination(icon: Icon(Icons.search), label: 'Поиск'),
                   NavigationDestination(
                     icon: Icon(Icons.upload_file),
                     label: 'Импорт',
                   ),
+                  NavigationDestination(icon: Icon(Icons.tune), label: 'Настройки'),
                 ],
               ),
             );
@@ -280,6 +279,11 @@ class _SideNav extends StatelessWidget {
               label: 'Импорт',
               selected: session.tab == 3,
               onTap: session.showImport,
+            ),
+            _NavButton(
+              label: 'Настройки',
+              selected: session.tab == 4,
+              onTap: session.showSettings,
             ),
             const Spacer(),
             _NavButton(

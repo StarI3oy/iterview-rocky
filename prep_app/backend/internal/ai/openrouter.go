@@ -17,33 +17,39 @@ var bearerRE = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/-]+=*`)
 const defaultModel = "openai/gpt-4o-mini"
 
 type Client struct {
-	Key     string
-	Model   string
-	BaseURL string
-	HTTP    *http.Client
-	Referer string
+	Key       string
+	selection *Selection
+	BaseURL   string
+	HTTP      *http.Client
+	Referer   string
 }
 
-func New(key, model string) *Client {
+func New(key string, sel *Selection) *Client {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return nil
 	}
-	if strings.TrimSpace(model) == "" {
-		model = defaultModel
+	if sel == nil {
+		sel, _ = OpenSelection("", "")
 	}
 	return &Client{
-		Key:     key,
-		Model:   model,
-		BaseURL: "https://openrouter.ai/api/v1/chat/completions",
-		Referer: "http://localhost:8080",
-		HTTP:    &http.Client{Timeout: 60 * time.Second},
+		Key:       key,
+		selection: sel,
+		BaseURL:   "https://openrouter.ai/api/v1/chat/completions",
+		Referer:   "http://localhost:8080",
+		HTTP:      &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
+	Model    string         `json:"model"`
+	Messages []chatMessage  `json:"messages"`
+	Provider *providerPrefs `json:"provider,omitempty"`
+}
+
+type providerPrefs struct {
+	Order          []string `json:"order"`
+	AllowFallbacks bool     `json:"allow_fallbacks"`
 }
 
 type chatMessage struct {
@@ -66,13 +72,27 @@ func (c *Client) Complete(ctx context.Context, system, user string) (string, err
 	if c == nil || c.Key == "" {
 		return "", fmt.Errorf("OPENROUTER_API_KEY is not set")
 	}
-	body, err := json.Marshal(chatRequest{
-		Model: c.Model,
+	choice := Choice{Model: defaultModel, Source: "env"}
+	if c.selection != nil {
+		choice = c.selection.Current()
+	}
+	if strings.TrimSpace(choice.Model) == "" {
+		choice.Model = defaultModel
+	}
+	payload := chatRequest{
+		Model: choice.Model,
 		Messages: []chatMessage{
 			{Role: "system", Content: system},
 			{Role: "user", Content: user},
 		},
-	})
+	}
+	if choice.Provider != "" {
+		payload.Provider = &providerPrefs{
+			Order:          []string{choice.Provider},
+			AllowFallbacks: false,
+		}
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
 	}
@@ -110,8 +130,16 @@ func (c *Client) Complete(ctx context.Context, system, user string) (string, err
 }
 
 func (c *Client) redact(s string) string {
-	if c != nil && c.Key != "" {
-		s = strings.ReplaceAll(s, c.Key, "[redacted]")
+	key := ""
+	if c != nil {
+		key = c.Key
+	}
+	return redact(key, s)
+}
+
+func redact(key, s string) string {
+	if key != "" {
+		s = strings.ReplaceAll(s, key, "[redacted]")
 	}
 	return bearerRE.ReplaceAllString(s, "Bearer [redacted]")
 }

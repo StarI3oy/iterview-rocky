@@ -17,9 +17,13 @@ func TestCompleteRedactsKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(key, "openai/gpt-4o-mini")
+	sel, err := OpenSelection("", "openai/gpt-4o-mini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := New(key, sel)
 	c.BaseURL = srv.URL
-	_, err := c.Complete(context.Background(), "system", "user")
+	_, err = c.Complete(context.Background(), "system", "user")
 	if err == nil {
 		t.Fatal("expected error")
 	}

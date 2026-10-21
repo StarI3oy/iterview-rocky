@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'http_client.dart';
+import 'model_catalog.dart';
 import 'models.dart';
 
 class ApiException implements Exception {
@@ -213,9 +214,43 @@ class Api {
     };
   }
 
-  Future<Map<String, dynamic>> _get(String path, [Map<String, String>? query]) {
+  Future<ModelSettings> modelSettings() async =>
+      ModelSettings.fromJson(await _get('/api/settings/model'));
+
+  Future<ModelSettings> saveModel({
+    required String model,
+    required String provider,
+  }) async {
+    final json = await _post('/api/settings/model', {
+      'model': model,
+      'provider': provider,
+    }, timeout: const Duration(seconds: 40));
+    return ModelSettings.fromJson(json);
+  }
+
+  Future<ModelSettings> resetModel() async {
+    final json = await _post(
+      '/api/settings/model/reset',
+      const {},
+      timeout: const Duration(seconds: 20),
+    );
+    return ModelSettings.fromJson(json);
+  }
+
+  Future<CatalogPage> searchModels(String query) async {
+    final json = await _get('/api/models', {
+      'q': query,
+    }, const Duration(seconds: 50));
+    return CatalogPage.fromJson(json);
+  }
+
+  Future<Map<String, dynamic>> _get(
+    String path, [
+    Map<String, String>? query,
+    Duration timeout = const Duration(seconds: 20),
+  ]) {
     final uri = Uri.parse('$base$path').replace(queryParameters: query);
-    return _send(path, client.get(uri, headers: _headers()));
+    return _send(path, client.get(uri, headers: _headers()), timeout: timeout);
   }
 
   Future<Map<String, dynamic>> _post(
