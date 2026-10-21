@@ -376,13 +376,18 @@ func (s *Server) importData(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	issues := stats.Issues
+	if issues == nil {
+		issues = []store.ImportIssue{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":         true,
+		"ok":         stats.Cards > 0 || len(issues) == 0,
 		"imported":   stats.Cards,
 		"questions":  stats.Questions,
 		"prep_items": stats.PrepItems,
 		"concepts":   stats.Concepts,
 		"tracker":    stats.Tracker,
+		"issues":     issues,
 		"filename":   header.Filename,
 	})
 }

@@ -12,6 +12,14 @@ import (
 	"unicode"
 )
 
+// ImportIssue is one place where an uploaded record diverges from the expected format.
+type ImportIssue struct {
+	Kind    string `json:"kind"`
+	ID      int64  `json:"id,omitempty"`
+	Field   string `json:"field,omitempty"`
+	Message string `json:"message"`
+}
+
 // ImportStats is what a user upload contributed. Cards is the number of
 // training cards written (questions, prep items, and concepts).
 type ImportStats struct {
@@ -22,6 +30,7 @@ type ImportStats struct {
 	Tracker   int
 	Tracks    int
 	Protocol  int
+	Issues    []ImportIssue
 }
 
 func (s ImportStats) empty() bool {
@@ -31,10 +40,12 @@ func (s ImportStats) empty() bool {
 // ImportUpload reads a knowledge JSON export, a SQLite dump, or a text dump
 // and upserts it. Training progress on existing cards is left in place.
 func (s *Store) ImportUpload(data []byte) (ImportStats, error) {
-	doc, err := parseUpload(data)
+	doc, issues, err := parseUpload(data)
 	if err != nil {
 		return ImportStats{}, err
 	}
+	doc, more := validateDoc(doc)
+	issues = append(issues, more...)
 	stats := ImportStats{
 		Questions: len(doc.Questions),
 		PrepItems: len(doc.PrepItems),
@@ -42,8 +53,15 @@ func (s *Store) ImportUpload(data []byte) (ImportStats, error) {
 		Tracker:   len(doc.InterviewTracker),
 		Tracks:    len(doc.PrepTracks),
 		Protocol:  len(doc.PrepProtocol),
+		Issues:    issues,
+	}
+	if stats.Issues == nil {
+		stats.Issues = []ImportIssue{}
 	}
 	if stats.empty() {
+		if len(stats.Issues) > 0 {
+			return stats, nil
+		}
 		return ImportStats{}, fmt.Errorf("в файле нет вопросов или карточек")
 	}
 	n, err := s.importKnowledgeFile(doc)
@@ -54,20 +72,119 @@ func (s *Store) ImportUpload(data []byte) (ImportStats, error) {
 	return stats, nil
 }
 
-func parseUpload(data []byte) (knowledgeFile, error) {
+func parseUpload(data []byte) (knowledgeFile, []ImportIssue, error) {
 	data = bytes.TrimSpace(bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF}))
 	if len(data) == 0 {
-		return knowledgeFile{}, fmt.Errorf("файл пуст")
+		return knowledgeFile{}, nil, fmt.Errorf("файл пуст")
 	}
 	switch data[0] {
 	case '{', '[':
-		return decodeKnowledge(data)
+		return decodeChecked(data)
 	}
 	text := string(data)
 	if looksLikeSQL(text) {
-		return parseSQLDump(text)
+		doc, err := parseSQLDump(text)
+		return doc, nil, err
 	}
-	return parseTextDump(text)
+	doc, err := parseTextDump(text)
+	return doc, nil, err
+}
+
+func decodeChecked(data []byte) (knowledgeFile, []ImportIssue, error) {
+	data = bytes.TrimSpace(bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF}))
+	if len(data) == 0 {
+		return knowledgeFile{}, nil, fmt.Errorf("файл пуст")
+	}
+	if data[0] == '[' {
+		qs, issues, err := decodeItems[questionSrc](data, "question")
+		if err != nil {
+			return knowledgeFile{}, nil, fmt.Errorf("json: %w", err)
+		}
+		return knowledgeFile{Questions: qs}, issues, nil
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return knowledgeFile{}, nil, fmt.Errorf("json: %w", err)
+	}
+	var doc knowledgeFile
+	var issues []ImportIssue
+	known := map[string]bool{
+		"questions": true, "interview_tracker": true, "prep_tracks": true,
+		"prep_items": true, "prep_protocol": true, "hard_concepts": true,
+	}
+	for key := range raw {
+		if !known[key] {
+			issues = append(issues, ImportIssue{Kind: "file", Field: key, Message: "неизвестное поле"})
+		}
+	}
+	var err error
+	if doc.Questions, err = takeItems(&issues, raw, "questions", "question", decodeItems[questionSrc]); err != nil {
+		return knowledgeFile{}, nil, err
+	}
+	if doc.InterviewTracker, err = takeItems(&issues, raw, "interview_tracker", "tracker", decodeItems[trackerSrc]); err != nil {
+		return knowledgeFile{}, nil, err
+	}
+	if doc.PrepTracks, err = takeItems(&issues, raw, "prep_tracks", "track", decodeItems[trackSrc]); err != nil {
+		return knowledgeFile{}, nil, err
+	}
+	if doc.PrepItems, err = takeItems(&issues, raw, "prep_items", "prep_item", decodeItems[prepSrc]); err != nil {
+		return knowledgeFile{}, nil, err
+	}
+	if doc.PrepProtocol, err = takeItems(&issues, raw, "prep_protocol", "protocol", decodeItems[protocolSrc]); err != nil {
+		return knowledgeFile{}, nil, err
+	}
+	if doc.HardConcepts, err = takeItems(&issues, raw, "hard_concepts", "concept", decodeItems[conceptSrc]); err != nil {
+		return knowledgeFile{}, nil, err
+	}
+	return doc, issues, nil
+}
+
+func takeItems[T any](issues *[]ImportIssue, raw map[string]json.RawMessage, key, kind string, decode func(json.RawMessage, string) ([]T, []ImportIssue, error)) ([]T, error) {
+	payload, ok := raw[key]
+	if !ok {
+		return nil, nil
+	}
+	items, more, err := decode(payload, kind)
+	if err != nil {
+		*issues = append(*issues, ImportIssue{Kind: "file", Field: key, Message: "ожидался массив"})
+		return nil, nil
+	}
+	*issues = append(*issues, more...)
+	return items, nil
+}
+
+func decodeItems[T any](raw json.RawMessage, kind string) ([]T, []ImportIssue, error) {
+	var arr []json.RawMessage
+	if err := json.Unmarshal(raw, &arr); err != nil {
+		return nil, nil, err
+	}
+	out := make([]T, 0, len(arr))
+	var issues []ImportIssue
+	for i, item := range arr {
+		var v T
+		dec := json.NewDecoder(bytes.NewReader(item))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&v); err != nil {
+			issues = append(issues, ImportIssue{
+				Kind:    kind,
+				Message: fmt.Sprintf("запись %d: формат не совпал (%s)", i+1, jsonHint(err)),
+			})
+			continue
+		}
+		out = append(out, v)
+	}
+	return out, issues, nil
+}
+
+func jsonHint(err error) string {
+	msg := err.Error()
+	if i := strings.Index(msg, "json: "); i >= 0 {
+		msg = msg[i+len("json: "):]
+	}
+	if len(msg) > 140 {
+		msg = msg[:140]
+	}
+	return msg
 }
 
 func decodeKnowledge(data []byte) (knowledgeFile, error) {

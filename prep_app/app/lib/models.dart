@@ -1,3 +1,42 @@
+class ImportIssue {
+  const ImportIssue({
+    required this.kind,
+    required this.id,
+    required this.field,
+    required this.message,
+  });
+
+  final String kind;
+  final int id;
+  final String field;
+  final String message;
+
+  factory ImportIssue.fromJson(Map<String, dynamic> j) {
+    return ImportIssue(
+      kind: (j['kind'] ?? '').toString(),
+      id: asInt(j['id']),
+      field: (j['field'] ?? '').toString(),
+      message: (j['message'] ?? '').toString(),
+    );
+  }
+
+  String get label {
+    final name = switch (kind) {
+      'question' => 'вопрос',
+      'prep_item' => 'карточка',
+      'concept' => 'концепт',
+      'tracker' => 'трекер',
+      'track' => 'трек',
+      'protocol' => 'протокол',
+      'file' => 'файл',
+      _ => kind.isEmpty ? 'запись' : kind,
+    };
+    final where = id > 0 ? '$name #$id' : name;
+    if (field.isEmpty) return '$where: $message';
+    return '$where · $field: $message';
+  }
+}
+
 class ImportStats {
   const ImportStats({
     required this.cards,
@@ -5,6 +44,7 @@ class ImportStats {
     required this.prepItems,
     required this.concepts,
     required this.tracker,
+    this.issues = const [],
   });
 
   final int cards;
@@ -12,14 +52,23 @@ class ImportStats {
   final int prepItems;
   final int concepts;
   final int tracker;
+  final List<ImportIssue> issues;
 
   factory ImportStats.fromJson(Map<String, dynamic> j) {
+    final raw = j['issues'];
+    final issues = <ImportIssue>[];
+    if (raw is List) {
+      for (final item in raw) {
+        issues.add(ImportIssue.fromJson(asMap(item)));
+      }
+    }
     return ImportStats(
       cards: asInt(j['imported']),
       questions: asInt(j['questions']),
       prepItems: asInt(j['prep_items']),
       concepts: asInt(j['concepts']),
       tracker: asInt(j['tracker']),
+      issues: issues,
     );
   }
 }

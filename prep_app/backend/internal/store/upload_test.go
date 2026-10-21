@@ -104,8 +104,31 @@ L2 нет.
 	}
 
 	arr, err := s.ImportUpload([]byte(`[{"id":9,"topic":"Go","category":"Net","question":"Что такое QUIC?","answer":"UDP","grade":"Middle","difficulty":3}]`))
-	if err != nil || arr.Questions != 1 {
+	if err != nil || arr.Questions != 1 || len(arr.Issues) != 0 {
 		t.Fatalf("array %+v %v", arr, err)
+	}
+
+	bad, err := s.ImportUpload([]byte(`{"questions":[
+		{"id":1,"topic":"Go","category":"C","question":"Q","answer":"A","grade":"Junior","difficulty":2},
+		{"id":2,"topic":"","category":"","question":"","answer":"A","grade":"Nope","difficulty":9,"created_at":"вчера"},
+		{"id":3,"topic":"Go","category":"C","question":"Q","answer":"A","grade":"Junior","difficulty":"hard"},
+		{"extra":true}
+	]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bad.Questions != 1 || bad.Cards != 1 {
+		t.Fatalf("kept %+v", bad)
+	}
+	if len(bad.Issues) < 4 {
+		t.Fatalf("issues %+v", bad.Issues)
+	}
+	kept, err := s.Get(questionIDBase + 1)
+	if err != nil || kept.Prompt != "Q" {
+		t.Fatalf("kept card %+v %v", kept, err)
+	}
+	if _, err := s.Get(questionIDBase + 2); err == nil {
+		t.Fatal("invalid question imported")
 	}
 }
 
@@ -133,6 +156,9 @@ func TestImportRealSamples(t *testing.T) {
 		}
 		if stats.Questions != sample.questions || stats.PrepItems != sample.prep || stats.Tracker != sample.tracker {
 			t.Fatalf("%s stats %+v", sample.path, stats)
+		}
+		if len(stats.Issues) != 0 {
+			t.Fatalf("%s issues %+v", sample.path, stats.Issues[:min(5, len(stats.Issues))])
 		}
 		if sample.prep > 0 && stats.Cards != sample.questions+sample.prep+2 {
 			// JSON sample also carries hard concepts; checked loosely below.

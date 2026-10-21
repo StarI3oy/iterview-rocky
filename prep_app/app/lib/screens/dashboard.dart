@@ -33,6 +33,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _error;
   bool _loading = true;
   bool _importing = false;
+  String? _importNote;
+  bool _importNoteBad = false;
+  List<ImportIssue> _importIssues = const [];
 
   @override
   void initState() {
@@ -74,7 +77,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (picked == null || !mounted) return;
     final bytes = picked.bytes;
     final name = picked.name;
-    setState(() => _importing = true);
+    setState(() {
+      _importing = true;
+      _importNote = null;
+      _importNoteBad = false;
+      _importIssues = const [];
+    });
     try {
       final stats = await widget.api.importFile(bytes, name);
       if (!mounted) return;
@@ -85,14 +93,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (stats.prepItems > 0) 'карточек подготовки ${stats.prepItems}',
         if (stats.concepts > 0) 'концептов ${stats.concepts}',
       ].join(', ');
-      _toast(
-        extra.isEmpty
-            ? 'В базу записано карточек: ${stats.cards}'
-            : 'В базу записано карточек: ${stats.cards} ($extra)',
-      );
+      final note = stats.cards == 0
+          ? 'Формат не совпал, в базу ничего не записано'
+          : extra.isEmpty
+          ? 'В базу записано карточек: ${stats.cards}'
+          : 'В базу записано карточек: ${stats.cards} ($extra)';
+      setState(() {
+        _importNote = note;
+        _importNoteBad = stats.cards == 0;
+        _importIssues = stats.issues;
+      });
     } on ApiException catch (e) {
       if (!mounted) return;
-      _toast(e.message);
+      setState(() {
+        _importNote = e.message;
+        _importNoteBad = true;
+        _importIssues = const [];
+      });
     } finally {
       if (mounted) setState(() => _importing = false);
     }
@@ -167,7 +184,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
           else if (_bar != null) ...[
             _Summary(bar: _bar!),
             const SizedBox(height: 14),
-            _ImportPanel(importing: _importing, onImport: _importFile),
+            _ImportPanel(
+              importing: _importing,
+              onImport: _importFile,
+              note: _importNote,
+              noteBad: _importNoteBad,
+              issues: _importIssues,
+            ),
             const SizedBox(height: 14),
             _Blocks(bar: _bar!),
             const SizedBox(height: 18),
@@ -284,10 +307,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
 }
 
 class _ImportPanel extends StatelessWidget {
-  const _ImportPanel({required this.importing, required this.onImport});
+  const _ImportPanel({
+    required this.importing,
+    required this.onImport,
+    required this.note,
+    required this.noteBad,
+    required this.issues,
+  });
 
   final bool importing;
   final VoidCallback onImport;
+  final String? note;
+  final bool noteBad;
+  final List<ImportIssue> issues;
 
   @override
   Widget build(BuildContext context) {
@@ -319,6 +351,45 @@ class _ImportPanel extends StatelessWidget {
                 : const Icon(Icons.upload_file),
             label: Text(importing ? 'Загрузка…' : 'Загрузить файл'),
           ),
+          if (note != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              note!,
+              style: TextStyle(
+                color: noteBad ? AppColors.bad : AppColors.ok,
+                height: 1.4,
+              ),
+            ),
+          ],
+          if (issues.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 220),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final issue in issues.take(30))
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(
+                          issue.label,
+                          style: const TextStyle(
+                            color: AppColors.bad,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    if (issues.length > 30)
+                      Text(
+                        'и ещё ${issues.length - 30}',
+                        style: const TextStyle(color: AppColors.bad),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

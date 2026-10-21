@@ -98,6 +98,9 @@ void main() {
 
     expect(find.textContaining('В базу записано карточек: 1'), findsOneWidget);
     expect(find.textContaining('вопросов 1'), findsOneWidget);
+    final mismatch = find.text('вопрос #4 · grade: грейд не из списка');
+    expect(mismatch, findsOneWidget);
+    expect(tester.widget<Text>(mismatch).style?.color, AppColors.bad);
     expect(client.importBody, contains('questions.json'));
     expect(client.importBody, contains('Что такое GMP?'));
     expect(client.importClient, '1');
@@ -122,6 +125,14 @@ class _ScriptClient extends http.BaseClient {
         'prep_items': 0,
         'concepts': 0,
         'tracker': 0,
+        'issues': [
+          {
+            'kind': 'question',
+            'id': 4,
+            'field': 'grade',
+            'message': 'грейд не из списка',
+          },
+        ],
       });
     }
     if (path == '/api/bar') {
