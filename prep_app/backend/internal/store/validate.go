@@ -1,8 +1,11 @@
 package store
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 var allowedGrades = map[string]bool{
@@ -58,15 +61,23 @@ func questionIssues(q questionSrc) []ImportIssue {
 	}
 	if strings.TrimSpace(q.Topic) == "" {
 		bad = append(bad, issue("question", q.ID, "topic", "пустая тема"))
+	} else if badText(q.Topic) {
+		bad = append(bad, issue("question", q.ID, "topic", "недопустимые символы"))
 	}
 	if strings.TrimSpace(q.Category) == "" {
 		bad = append(bad, issue("question", q.ID, "category", "пустая категория"))
+	} else if badText(q.Category) {
+		bad = append(bad, issue("question", q.ID, "category", "недопустимые символы"))
 	}
 	if strings.TrimSpace(q.Question) == "" {
 		bad = append(bad, issue("question", q.ID, "question", "пустой вопрос"))
+	} else if badText(q.Question) {
+		bad = append(bad, issue("question", q.ID, "question", "недопустимые символы"))
 	}
 	if strings.TrimSpace(q.Answer) == "" {
 		bad = append(bad, issue("question", q.ID, "answer", "пустой ответ"))
+	} else if badText(q.Answer) {
+		bad = append(bad, issue("question", q.ID, "answer", "недопустимые символы"))
 	}
 	if !allowedGrades[q.Grade] {
 		bad = append(bad, issue("question", q.ID, "grade", "грейд не из списка Junior, Middle, Middle+, Senior, Lead, Easy, Medium"))
@@ -96,12 +107,18 @@ func filterPrep(items []prepSrc, issues []ImportIssue) ([]prepSrc, []ImportIssue
 		}
 		if strings.TrimSpace(it.Question) == "" {
 			bad = append(bad, issue("prep_item", it.ID, "question", "пустой вопрос"))
+		} else if badText(it.Question) {
+			bad = append(bad, issue("prep_item", it.ID, "question", "недопустимые символы"))
 		}
 		if strings.TrimSpace(it.Theory) == "" {
 			bad = append(bad, issue("prep_item", it.ID, "theory", "пустая теория"))
+		} else if badText(it.Theory) {
+			bad = append(bad, issue("prep_item", it.ID, "theory", "недопустимые символы"))
 		}
 		if strings.TrimSpace(it.Answer) == "" {
 			bad = append(bad, issue("prep_item", it.ID, "answer", "пустой ответ"))
+		} else if badText(it.Answer) {
+			bad = append(bad, issue("prep_item", it.ID, "answer", "недопустимые символы"))
 		}
 		if it.Grade != "" && !allowedGrades[it.Grade] {
 			bad = append(bad, issue("prep_item", it.ID, "grade", "грейд не из списка Junior, Middle, Middle+, Senior, Lead, Easy, Medium"))
@@ -138,12 +155,18 @@ func filterConcepts(items []conceptSrc, issues []ImportIssue) ([]conceptSrc, []I
 		}
 		if strings.TrimSpace(c.Topic) == "" {
 			bad = append(bad, issue("concept", c.ID, "topic", "пустая тема"))
+		} else if badText(c.Topic) {
+			bad = append(bad, issue("concept", c.ID, "topic", "недопустимые символы"))
 		}
 		if strings.TrimSpace(c.Title) == "" {
 			bad = append(bad, issue("concept", c.ID, "title", "пустой заголовок"))
+		} else if badText(c.Title) {
+			bad = append(bad, issue("concept", c.ID, "title", "недопустимые символы"))
 		}
 		if strings.TrimSpace(c.SimpleExplanation) == "" {
 			bad = append(bad, issue("concept", c.ID, "simple_explanation", "пустое простое объяснение"))
+		} else if badText(c.SimpleExplanation) {
+			bad = append(bad, issue("concept", c.ID, "simple_explanation", "недопустимые символы"))
 		}
 		if !validTimestamp(c.CreatedAt) {
 			bad = append(bad, issue("concept", c.ID, "created_at", "дата должна быть YYYY-MM-DD HH:MM:SS"))
@@ -171,9 +194,13 @@ func filterTracker(items []trackerSrc, issues []ImportIssue) ([]trackerSrc, []Im
 		}
 		if strings.TrimSpace(t.Topic) == "" {
 			bad = append(bad, issue("tracker", t.ID, "topic", "пустая тема"))
+		} else if badText(t.Topic) {
+			bad = append(bad, issue("tracker", t.ID, "topic", "недопустимые символы"))
 		}
 		if strings.TrimSpace(t.Question) == "" {
 			bad = append(bad, issue("tracker", t.ID, "question", "пустой вопрос"))
+		} else if badText(t.Question) {
+			bad = append(bad, issue("tracker", t.ID, "question", "недопустимые символы"))
 		}
 		if t.TimesAsked < 0 {
 			bad = append(bad, issue("tracker", t.ID, "times_asked", "не может быть отрицательным"))
@@ -254,6 +281,102 @@ func filterProtocol(items []protocolSrc, issues []ImportIssue) ([]protocolSrc, [
 
 func issue(kind string, id int64, field, message string) ImportIssue {
 	return ImportIssue{Kind: kind, ID: id, Field: field, Message: message}
+}
+
+func badText(s string) bool {
+	return !utf8.ValidString(s) || strings.Contains(s, "\x00")
+}
+
+func buildPreview(doc knowledgeFile, issues []ImportIssue) []ImportPreview {
+	bad := map[string]bool{}
+	for _, item := range issues {
+		if item.ID > 0 {
+			bad[item.Kind+":"+strconv.FormatInt(item.ID, 10)] = true
+		}
+	}
+	rows := make([]ImportPreview, 0, len(doc.Questions)+len(doc.PrepItems)+len(issues))
+	for _, q := range doc.Questions {
+		rows = append(rows, ImportPreview{
+			Kind:  "question",
+			ID:    q.ID,
+			Title: joinTitle(q.Topic, q.Category),
+			Text:  oneLine(q.Question),
+			OK:    q.ID > 0 && !bad["question:"+strconv.FormatInt(q.ID, 10)],
+		})
+	}
+	for _, it := range doc.PrepItems {
+		rows = append(rows, ImportPreview{
+			Kind:  "prep_item",
+			ID:    it.ID,
+			Title: joinTitle(it.Track, it.Section),
+			Text:  oneLine(it.Question),
+			OK:    it.ID > 0 && !bad["prep_item:"+strconv.FormatInt(it.ID, 10)],
+		})
+	}
+	for _, c := range doc.HardConcepts {
+		rows = append(rows, ImportPreview{
+			Kind:  "concept",
+			ID:    c.ID,
+			Title: oneLine(c.Title),
+			Text:  oneLine(c.SimpleExplanation),
+			OK:    c.ID > 0 && !bad["concept:"+strconv.FormatInt(c.ID, 10)],
+		})
+	}
+	for _, t := range doc.InterviewTracker {
+		rows = append(rows, ImportPreview{
+			Kind:  "tracker",
+			ID:    t.ID,
+			Title: oneLine(t.Topic),
+			Text:  oneLine(t.Question),
+			OK:    t.ID > 0 && !bad["tracker:"+strconv.FormatInt(t.ID, 10)],
+		})
+	}
+	seenTrack := map[string]bool{}
+	for _, t := range doc.PrepTracks {
+		ok := allowedTracks[t.Code] && strings.TrimSpace(t.Title) != "" && strings.TrimSpace(t.Why) != "" && strings.TrimSpace(t.HowToTrain) != "" && t.TimeMin > 0 && !badText(t.Title) && !seenTrack[t.Code]
+		if t.Code != "" {
+			seenTrack[t.Code] = true
+		}
+		rows = append(rows, ImportPreview{
+			Kind:  "track",
+			Title: t.Code,
+			Text:  oneLine(t.Title),
+			OK:    ok,
+		})
+	}
+	for _, p := range doc.PrepProtocol {
+		rows = append(rows, ImportPreview{
+			Kind:  "protocol",
+			ID:    p.ID,
+			Title: "Протокол",
+			Text:  oneLine(p.Body),
+			OK:    strings.TrimSpace(p.Body) != "",
+		})
+	}
+	for _, item := range issues {
+		if !item.Decode {
+			continue
+		}
+		rows = append(rows, ImportPreview{
+			Kind:  item.Kind,
+			Title: fmt.Sprintf("запись %d", item.Index),
+			Text:  oneLine(item.Message),
+			OK:    false,
+		})
+	}
+	return rows
+}
+
+func joinTitle(a, b string) string {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" {
+		return oneLine(b)
+	}
+	if b == "" {
+		return oneLine(a)
+	}
+	return oneLine(a + " / " + b)
 }
 
 func validTimestamp(s string) bool {

@@ -17,6 +17,11 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
+  void showImport() {
+    tab = 3;
+    notifyListeners();
+  }
+
   void openSprint() => _open(mode: 'mobile', kind: 'sprint');
 
   void openCode() => _open(mode: 'web', kind: 'code');

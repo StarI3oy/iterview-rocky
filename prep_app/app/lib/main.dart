@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'api.dart';
 import 'screens/dashboard.dart';
+import 'screens/import_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/trainer.dart';
@@ -98,40 +99,6 @@ class _PrepAppState extends State<PrepApp> {
     if (changed && mounted) setState(() => _gate = _Gate.login);
   }
 
-  void _accountSheet() {
-    final nav = _navigatorKey.currentContext;
-    if (nav == null) return;
-    showModalBottomSheet<void>(
-      context: nav,
-      backgroundColor: AppColors.surface,
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.password),
-                title: const Text('Сменить пароль'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _changePassword();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.logout),
-                title: const Text('Выйти'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _logout();
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -141,9 +108,14 @@ class _PrepAppState extends State<PrepApp> {
       theme: buildTheme(),
       home: switch (_gate) {
         _Gate.loading => const Scaffold(
-          body: Center(child: CircularProgressIndicator(color: AppColors.accent)),
+          body: Center(
+            child: CircularProgressIndicator(color: AppColors.accent),
+          ),
         ),
-        _Gate.offline => _Offline(message: _gateError ?? 'Нет связи с API', onRetry: _refreshAuth),
+        _Gate.offline => _Offline(
+          message: _gateError ?? 'Нет связи с API',
+          onRetry: _refreshAuth,
+        ),
         _Gate.setup => LoginScreen(
           api: _api,
           setup: true,
@@ -167,7 +139,12 @@ class _PrepAppState extends State<PrepApp> {
                 api: _api,
                 session: widget.session,
               ),
-              _ => SearchScreen(api: _api, session: widget.session),
+              2 => SearchScreen(api: _api, session: widget.session),
+              _ => ImportScreen(
+                api: _api,
+                onChangePassword: _changePassword,
+                onLogout: _logout,
+              ),
             };
             if (wide) {
               return Scaffold(
@@ -191,18 +168,30 @@ class _PrepAppState extends State<PrepApp> {
               bottomNavigationBar: NavigationBar(
                 backgroundColor: AppColors.surface,
                 indicatorColor: AppColors.surface2,
-                selectedIndex: widget.session.tab.clamp(0, 2),
+                selectedIndex: widget.session.tab.clamp(0, 3),
                 onDestinationSelected: (index) {
                   if (index == 0) widget.session.showHome();
                   if (index == 1) widget.session.openSprint();
                   if (index == 2) widget.session.showSearch();
-                  if (index == 3) _accountSheet();
+                  if (index == 3) widget.session.showImport();
                 },
                 destinations: const [
-                  NavigationDestination(icon: Icon(Icons.speed), label: 'Планка'),
-                  NavigationDestination(icon: Icon(Icons.bolt), label: 'Спринт'),
-                  NavigationDestination(icon: Icon(Icons.search), label: 'Поиск'),
-                  NavigationDestination(icon: Icon(Icons.lock_outline), label: 'Доступ'),
+                  NavigationDestination(
+                    icon: Icon(Icons.speed),
+                    label: 'Планка',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.bolt),
+                    label: 'Спринт',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.search),
+                    label: 'Поиск',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.upload_file),
+                    label: 'Импорт',
+                  ),
                 ],
               ),
             );
@@ -231,7 +220,10 @@ class _Offline extends StatelessWidget {
               children: [
                 Text(message, textAlign: TextAlign.center),
                 const SizedBox(height: 16),
-                FilledButton(onPressed: onRetry, child: const Text('Повторить')),
+                FilledButton(
+                  onPressed: onRetry,
+                  child: const Text('Повторить'),
+                ),
               ],
             ),
           ),
@@ -283,6 +275,11 @@ class _SideNav extends StatelessWidget {
               label: 'Поиск',
               selected: session.tab == 2,
               onTap: session.showSearch,
+            ),
+            _NavButton(
+              label: 'Импорт',
+              selected: session.tab == 3,
+              onTap: session.showImport,
             ),
             const Spacer(),
             _NavButton(

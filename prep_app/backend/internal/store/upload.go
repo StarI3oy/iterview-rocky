@@ -13,11 +13,23 @@ import (
 )
 
 // ImportIssue is one place where an uploaded record diverges from the expected format.
+// Decode marks a row that could not be read at all: its shape can shift later fields.
 type ImportIssue struct {
 	Kind    string `json:"kind"`
 	ID      int64  `json:"id,omitempty"`
+	Index   int    `json:"index,omitempty"`
 	Field   string `json:"field,omitempty"`
 	Message string `json:"message"`
+	Decode  bool   `json:"decode,omitempty"`
+}
+
+// ImportPreview is one row of the list that the file would add.
+type ImportPreview struct {
+	Kind  string `json:"kind"`
+	ID    int64  `json:"id,omitempty"`
+	Title string `json:"title"`
+	Text  string `json:"text"`
+	OK    bool   `json:"ok"`
 }
 
 // ImportStats is what a user upload contributed. Cards is the number of
@@ -30,22 +42,36 @@ type ImportStats struct {
 	Tracker   int
 	Tracks    int
 	Protocol  int
+	Rejected  bool
 	Issues    []ImportIssue
+	Preview   []ImportPreview
 }
 
 func (s ImportStats) empty() bool {
 	return s.Questions == 0 && s.PrepItems == 0 && s.Concepts == 0 && s.Tracker == 0 && s.Tracks == 0 && s.Protocol == 0
 }
 
-// ImportUpload reads a knowledge JSON export, a SQLite dump, or a text dump
-// and upserts it. Training progress on existing cards is left in place.
+// PreviewUpload parses a file and returns the potential list without writing.
+func (s *Store) PreviewUpload(data []byte) (ImportStats, error) {
+	return s.inspectUpload(data, false)
+}
+
+// ImportUpload writes the file only when every cornerstone field matches the format.
+// One formatting error rejects the whole list. Training progress on existing cards stays.
 func (s *Store) ImportUpload(data []byte) (ImportStats, error) {
-	doc, issues, err := parseUpload(data)
+	return s.inspectUpload(data, true)
+}
+
+func (s *Store) inspectUpload(data []byte, commit bool) (ImportStats, error) {
+	raw, issues, err := parseUpload(data)
 	if err != nil {
 		return ImportStats{}, err
 	}
-	doc, more := validateDoc(doc)
+	doc, more := validateDoc(raw)
 	issues = append(issues, more...)
+	if issues == nil {
+		issues = []ImportIssue{}
+	}
 	stats := ImportStats{
 		Questions: len(doc.Questions),
 		PrepItems: len(doc.PrepItems),
@@ -53,15 +79,17 @@ func (s *Store) ImportUpload(data []byte) (ImportStats, error) {
 		Tracker:   len(doc.InterviewTracker),
 		Tracks:    len(doc.PrepTracks),
 		Protocol:  len(doc.PrepProtocol),
+		Rejected:  len(issues) > 0,
 		Issues:    issues,
+		Preview:   buildPreview(raw, issues),
 	}
-	if stats.Issues == nil {
-		stats.Issues = []ImportIssue{}
+	if stats.Preview == nil {
+		stats.Preview = []ImportPreview{}
+	}
+	if stats.Rejected || !commit {
+		return stats, nil
 	}
 	if stats.empty() {
-		if len(stats.Issues) > 0 {
-			return stats, nil
-		}
 		return ImportStats{}, fmt.Errorf("в файле нет вопросов или карточек")
 	}
 	n, err := s.importKnowledgeFile(doc)
@@ -86,8 +114,7 @@ func parseUpload(data []byte) (knowledgeFile, []ImportIssue, error) {
 		doc, err := parseSQLDump(text)
 		return doc, nil, err
 	}
-	doc, err := parseTextDump(text)
-	return doc, nil, err
+	return parseTextDump(text)
 }
 
 func decodeChecked(data []byte) (knowledgeFile, []ImportIssue, error) {
@@ -167,6 +194,8 @@ func decodeItems[T any](raw json.RawMessage, kind string) ([]T, []ImportIssue, e
 		if err := dec.Decode(&v); err != nil {
 			issues = append(issues, ImportIssue{
 				Kind:    kind,
+				Index:   i + 1,
+				Decode:  true,
 				Message: fmt.Sprintf("запись %d: формат не совпал (%s)", i+1, jsonHint(err)),
 			})
 			continue
@@ -505,8 +534,9 @@ var (
 	textGradeRe = regexp.MustCompile(`^Грейд:\s*(.+?)\s*\|\s*Сложность:\s*(\d+)`)
 )
 
-func parseTextDump(text string) (knowledgeFile, error) {
+func parseTextDump(text string) (knowledgeFile, []ImportIssue, error) {
 	var doc knowledgeFile
+	var issues []ImportIssue
 	var hint string
 	var cur *questionSrc
 	var section string
@@ -563,15 +593,18 @@ func parseTextDump(text string) (knowledgeFile, error) {
 			if strings.HasPrefix(trim, "Запись:") {
 				rec, err := parseTrackerRecord(strings.TrimSpace(strings.TrimPrefix(trim, "Запись:")))
 				if err != nil {
-					return knowledgeFile{}, err
+					return knowledgeFile{}, nil, err
 				}
 				doc.InterviewTracker = append(doc.InterviewTracker, rec)
 			}
 			continue
 		}
 		if strings.HasPrefix(trim, "Тема:") {
-			topic, category := splitTopic(strings.TrimSpace(strings.TrimPrefix(trim, "Тема:")), hint)
+			topic, category, ok := splitTopic(strings.TrimSpace(strings.TrimPrefix(trim, "Тема:")), hint)
 			cur.Topic, cur.Category = topic, category
+			if !ok {
+				issues = append(issues, issue("question", cur.ID, "topic", "не удалось отделить тему от категории: заголовок ТОПИК не совпал со строкой темы"))
+			}
 			continue
 		}
 		if m := textGradeRe.FindStringSubmatch(trim); m != nil {
@@ -621,25 +654,29 @@ func parseTextDump(text string) (knowledgeFile, error) {
 		buf.WriteByte('\n')
 	}
 	flushCard()
-	return doc, nil
+	return doc, issues, nil
 }
 
-func splitTopic(theme, hint string) (string, string) {
+func splitTopic(theme, hint string) (string, string, bool) {
 	theme = strings.TrimSpace(theme)
 	parts := strings.Split(theme, " / ")
 	if len(parts) < 2 {
-		return theme, ""
+		return theme, "", true
 	}
 	hint = strings.TrimSpace(hint)
 	if hint != "" {
 		for i := 1; i < len(parts); i++ {
 			prefix := strings.Join(parts[:i], " / ")
 			if strings.EqualFold(prefix, hint) {
-				return prefix, strings.Join(parts[i:], " / ")
+				return prefix, strings.Join(parts[i:], " / "), true
 			}
 		}
+		return theme, "", false
 	}
-	return parts[0], strings.Join(parts[1:], " / ")
+	if len(parts) == 2 {
+		return parts[0], parts[1], true
+	}
+	return theme, "", false
 }
 
 func parseTrackerRecord(s string) (trackerSrc, error) {

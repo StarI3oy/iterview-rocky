@@ -157,8 +157,20 @@ class Api {
     await _post('/api/queue', {'question_id': questionId});
   }
 
-  Future<ImportStats> importFile(Uint8List bytes, String filename) async {
-    final req = http.MultipartRequest('POST', Uri.parse('$base/api/import'));
+  Future<ImportStats> previewFile(Uint8List bytes, String filename) {
+    return _upload('/api/import/preview', bytes, filename);
+  }
+
+  Future<ImportStats> importFile(Uint8List bytes, String filename) {
+    return _upload('/api/import', bytes, filename);
+  }
+
+  Future<ImportStats> _upload(
+    String path,
+    Uint8List bytes,
+    String filename,
+  ) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$base$path'));
     req.headers.addAll(_headers());
     req.files.add(
       http.MultipartFile.fromBytes('file', bytes, filename: filename),

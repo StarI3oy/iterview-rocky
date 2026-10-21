@@ -6,8 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:prep_app/api.dart';
 import 'package:prep_app/models.dart';
-import 'package:prep_app/screens/dashboard.dart';
-import 'package:prep_app/session.dart';
+import 'package:prep_app/screens/import_screen.dart';
 import 'package:prep_app/theme.dart';
 
 void main() {
@@ -60,7 +59,7 @@ void main() {
     expect(hit.openId, 4);
   });
 
-  testWidgets('upload sends the file and shows how many cards landed', (
+  testWidgets('broken cornerstone rejects the whole list and previews it', (
     tester,
   ) async {
     final client = _ScriptClient();
@@ -76,9 +75,8 @@ void main() {
       MaterialApp(
         theme: buildTheme(),
         home: Scaffold(
-          body: DashboardScreen(
+          body: ImportScreen(
             api: api,
-            session: Session(),
             pickFile: () async =>
                 (bytes: utf8.encode(payload), name: 'questions.json'),
           ),
@@ -86,23 +84,34 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 20));
 
-    final button = find.text('Загрузить файл');
-    expect(button, findsOneWidget);
-    await tester.ensureVisible(button);
+    await tester.tap(find.text('Выбрать файл'));
     await tester.pump();
-    await tester.tap(button);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.textContaining('В базу записано карточек: 1'), findsOneWidget);
-    expect(find.textContaining('вопросов 1'), findsOneWidget);
+    expect(
+      find.text('Ошибка формата в краеугольном поле — весь список не проходит'),
+      findsOneWidget,
+    );
     final mismatch = find.text('вопрос #4 · grade: грейд не из списка');
     expect(mismatch, findsOneWidget);
     expect(tester.widget<Text>(mismatch).style?.color, AppColors.bad);
+    final row = find.text('вопрос #2 · Go — пустой ответ');
+    expect(row, findsOneWidget);
+    expect(tester.widget<Text>(row).style?.color, AppColors.bad);
+    final okRow = find.text('вопрос #1 · Go — Как устроен slice?');
+    expect(okRow, findsOneWidget);
+    expect(tester.widget<Text>(okRow).style?.color, AppColors.text);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Записать в базу'),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(client.previewPath, '/api/import/preview');
     expect(client.importBody, contains('questions.json'));
-    expect(client.importBody, contains('Что такое GMP?'));
     expect(client.importClient, '1');
   });
 }
@@ -110,17 +119,20 @@ void main() {
 class _ScriptClient extends http.BaseClient {
   String importBody = '';
   String importClient = '';
+  String previewPath = '';
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     final bytes = await request.finalize().toBytes();
     final path = request.url.path;
-    if (path == '/api/import') {
+    if (path == '/api/import/preview' || path == '/api/import') {
       importBody = utf8.decode(bytes);
       importClient = request.headers['x-prep-client'] ?? '';
+      previewPath = path;
       return _json(200, {
-        'ok': true,
-        'imported': 1,
+        'ok': false,
+        'rejected': true,
+        'imported': 0,
         'questions': 1,
         'prep_items': 0,
         'concepts': 0,
@@ -131,6 +143,22 @@ class _ScriptClient extends http.BaseClient {
             'id': 4,
             'field': 'grade',
             'message': 'грейд не из списка',
+          },
+        ],
+        'preview': [
+          {
+            'kind': 'question',
+            'id': 1,
+            'title': 'Go',
+            'text': 'Как устроен slice?',
+            'ok': true,
+          },
+          {
+            'kind': 'question',
+            'id': 2,
+            'title': 'Go',
+            'text': 'пустой ответ',
+            'ok': false,
           },
         ],
       });

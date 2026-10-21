@@ -47,6 +47,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/search", s.search)
 	mux.HandleFunc("POST /api/queue", s.enqueue)
 	mux.HandleFunc("POST /api/import", s.importData)
+	mux.HandleFunc("POST /api/import/preview", s.importData)
 	if s.WebDir != "" {
 		mux.Handle("/", spaHandler(s.WebDir))
 	}
@@ -370,7 +371,13 @@ func (s *Server) importData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats, err := s.Store.ImportUpload(data)
+	preview := strings.HasSuffix(r.URL.Path, "/preview")
+	var stats store.ImportStats
+	if preview {
+		stats, err = s.Store.PreviewUpload(data)
+	} else {
+		stats, err = s.Store.ImportUpload(data)
+	}
 	if err != nil {
 		log.Printf("import %s: %v", header.Filename, err)
 		writeErr(w, http.StatusBadRequest, err)
@@ -380,14 +387,20 @@ func (s *Server) importData(w http.ResponseWriter, r *http.Request) {
 	if issues == nil {
 		issues = []store.ImportIssue{}
 	}
+	previewRows := stats.Preview
+	if previewRows == nil {
+		previewRows = []store.ImportPreview{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":         stats.Cards > 0 || len(issues) == 0,
+		"ok":         !stats.Rejected && (preview || stats.Cards > 0),
+		"rejected":   stats.Rejected,
 		"imported":   stats.Cards,
 		"questions":  stats.Questions,
 		"prep_items": stats.PrepItems,
 		"concepts":   stats.Concepts,
 		"tracker":    stats.Tracker,
 		"issues":     issues,
+		"preview":    previewRows,
 		"filename":   header.Filename,
 	})
 }

@@ -117,18 +117,33 @@ L2 нет.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bad.Questions != 1 || bad.Cards != 1 {
-		t.Fatalf("kept %+v", bad)
+	if !bad.Rejected || bad.Cards != 0 {
+		t.Fatalf("list should be rejected %+v", bad)
 	}
 	if len(bad.Issues) < 4 {
 		t.Fatalf("issues %+v", bad.Issues)
 	}
-	kept, err := s.Get(questionIDBase + 1)
-	if err != nil || kept.Prompt != "Q" {
-		t.Fatalf("kept card %+v %v", kept, err)
+	if len(bad.Preview) < 2 {
+		t.Fatalf("preview %+v", bad.Preview)
 	}
-	if _, err := s.Get(questionIDBase + 2); err == nil {
-		t.Fatal("invalid question imported")
+	var good, broken bool
+	for _, row := range bad.Preview {
+		if row.ID == 1 && row.OK {
+			good = true
+		}
+		if row.ID == 2 && !row.OK {
+			broken = true
+		}
+	}
+	if !good || !broken {
+		t.Fatalf("preview marks %+v", bad.Preview)
+	}
+	if _, err := s.Get(questionIDBase + 1); err == nil {
+		t.Fatal("valid row imported despite a broken neighbour")
+	}
+	preview, err := s.PreviewUpload([]byte(`[{"id":9,"topic":"Go","category":"Net","question":"Что такое QUIC?","answer":"UDP","grade":"Middle","difficulty":3}]`))
+	if err != nil || preview.Rejected || preview.Cards != 0 || len(preview.Preview) != 1 || !preview.Preview[0].OK {
+		t.Fatalf("preview %+v %v", preview, err)
 	}
 }
 

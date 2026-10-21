@@ -1,6 +1,3 @@
-import 'dart:typed_data';
-
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
@@ -9,18 +6,10 @@ import '../session.dart';
 import '../theme.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({
-    super.key,
-    required this.api,
-    required this.session,
-    this.pickFile,
-  });
+  const DashboardScreen({super.key, required this.api, required this.session});
 
   final Api api;
   final Session session;
-
-  /// When set, tests supply a file without opening the system dialog.
-  final Future<({Uint8List bytes, String name})?> Function()? pickFile;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -32,10 +21,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<HardConcept> _hard = const [];
   String? _error;
   bool _loading = true;
-  bool _importing = false;
-  String? _importNote;
-  bool _importNoteBad = false;
-  List<ImportIssue> _importIssues = const [];
 
   @override
   void initState() {
@@ -68,72 +53,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _loading = false;
       });
     }
-  }
-
-  Future<void> _importFile() async {
-    final picked = widget.pickFile != null
-        ? await widget.pickFile!()
-        : await _pickFromDisk();
-    if (picked == null || !mounted) return;
-    final bytes = picked.bytes;
-    final name = picked.name;
-    setState(() {
-      _importing = true;
-      _importNote = null;
-      _importNoteBad = false;
-      _importIssues = const [];
-    });
-    try {
-      final stats = await widget.api.importFile(bytes, name);
-      if (!mounted) return;
-      await _load();
-      if (!mounted) return;
-      final extra = [
-        if (stats.questions > 0) 'вопросов ${stats.questions}',
-        if (stats.prepItems > 0) 'карточек подготовки ${stats.prepItems}',
-        if (stats.concepts > 0) 'концептов ${stats.concepts}',
-      ].join(', ');
-      final note = stats.cards == 0
-          ? 'Формат не совпал, в базу ничего не записано'
-          : extra.isEmpty
-          ? 'В базу записано карточек: ${stats.cards}'
-          : 'В базу записано карточек: ${stats.cards} ($extra)';
-      setState(() {
-        _importNote = note;
-        _importNoteBad = stats.cards == 0;
-        _importIssues = stats.issues;
-      });
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _importNote = e.message;
-        _importNoteBad = true;
-        _importIssues = const [];
-      });
-    } finally {
-      if (mounted) setState(() => _importing = false);
-    }
-  }
-
-  Future<({Uint8List bytes, String name})?> _pickFromDisk() async {
-    final picked = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const ['json', 'sql', 'txt'],
-      withData: true,
-    );
-    if (picked == null || picked.files.isEmpty) return null;
-    final file = picked.files.single;
-    final bytes = file.bytes;
-    if (bytes == null) {
-      _toast('Не удалось прочитать файл');
-      return null;
-    }
-    return (bytes: bytes, name: file.name);
-  }
-
-  void _toast(String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -183,14 +102,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             )
           else if (_bar != null) ...[
             _Summary(bar: _bar!),
-            const SizedBox(height: 14),
-            _ImportPanel(
-              importing: _importing,
-              onImport: _importFile,
-              note: _importNote,
-              noteBad: _importNoteBad,
-              issues: _importIssues,
-            ),
             const SizedBox(height: 14),
             _Blocks(bar: _bar!),
             const SizedBox(height: 18),
@@ -299,96 +210,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ),
             ],
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _ImportPanel extends StatelessWidget {
-  const _ImportPanel({
-    required this.importing,
-    required this.onImport,
-    required this.note,
-    required this.noteBad,
-    required this.issues,
-  });
-
-  final bool importing;
-  final VoidCallback onImport;
-  final String? note;
-  final bool noteBad;
-  final List<ImportIssue> issues;
-
-  @override
-  Widget build(BuildContext context) {
-    return Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Пополнить базу',
-            style: TextStyle(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'JSON-экспорт, SQL-дамп (.sql) или текстовый дамп (.txt). Повторная загрузка обновляет карточки и не сбрасывает прогресс тренировок.',
-            style: TextStyle(color: AppColors.muted, height: 1.4),
-          ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: importing ? null : onImport,
-            icon: importing
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Icon(Icons.upload_file),
-            label: Text(importing ? 'Загрузка…' : 'Загрузить файл'),
-          ),
-          if (note != null) ...[
-            const SizedBox(height: 12),
-            Text(
-              note!,
-              style: TextStyle(
-                color: noteBad ? AppColors.bad : AppColors.ok,
-                height: 1.4,
-              ),
-            ),
-          ],
-          if (issues.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 220),
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (final issue in issues.take(30))
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Text(
-                          issue.label,
-                          style: const TextStyle(
-                            color: AppColors.bad,
-                            height: 1.35,
-                          ),
-                        ),
-                      ),
-                    if (issues.length > 30)
-                      Text(
-                        'и ещё ${issues.length - 30}',
-                        style: const TextStyle(color: AppColors.bad),
-                      ),
-                  ],
-                ),
-              ),
-            ),
           ],
         ],
       ),
