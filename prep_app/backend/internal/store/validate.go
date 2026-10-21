@@ -1,0 +1,392 @@
+package store
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+	"unicode/utf8"
+)
+
+var allowedGrades = map[string]bool{
+	"Junior": true, "Middle": true, "Middle+": true,
+	"Senior": true, "Lead": true, "Easy": true, "Medium": true,
+}
+
+var allowedTracks = map[string]bool{
+	"dumps": true, "patterns": true, "system_design": true, "legend": true,
+}
+
+var allowedSlots = map[string]bool{
+	"": true, "even": true, "odd": true, "weekly": true,
+}
+
+var allowedStatuses = map[string]bool{
+	"": true, "new": true, "done": true, "learning": true,
+}
+
+func validateDoc(doc knowledgeFile) (knowledgeFile, []ImportIssue) {
+	var issues []ImportIssue
+	doc.Questions, issues = filterQuestions(doc.Questions, issues)
+	doc.PrepItems, issues = filterPrep(doc.PrepItems, issues)
+	doc.HardConcepts, issues = filterConcepts(doc.HardConcepts, issues)
+	doc.InterviewTracker, issues = filterTracker(doc.InterviewTracker, issues)
+	doc.PrepTracks, issues = filterTracks(doc.PrepTracks, issues)
+	doc.PrepProtocol, issues = filterProtocol(doc.PrepProtocol, issues)
+	return doc, issues
+}
+
+func filterQuestions(items []questionSrc, issues []ImportIssue) ([]questionSrc, []ImportIssue) {
+	seen := map[int64]bool{}
+	out := make([]questionSrc, 0, len(items))
+	for _, q := range items {
+		bad := questionIssues(q)
+		if q.ID > 0 && seen[q.ID] {
+			bad = append(bad, issue("question", q.ID, "id", "такой id уже есть в файле"))
+		}
+		if len(bad) > 0 {
+			issues = append(issues, bad...)
+			continue
+		}
+		seen[q.ID] = true
+		out = append(out, q)
+	}
+	return out, issues
+}
+
+func questionIssues(q questionSrc) []ImportIssue {
+	var bad []ImportIssue
+	if q.ID <= 0 {
+		bad = append(bad, issue("question", q.ID, "id", "нужен положительный id"))
+	}
+	if strings.TrimSpace(q.Topic) == "" {
+		bad = append(bad, issue("question", q.ID, "topic", "пустая тема"))
+	} else if badText(q.Topic) {
+		bad = append(bad, issue("question", q.ID, "topic", "недопустимые символы"))
+	}
+	if strings.TrimSpace(q.Category) == "" {
+		bad = append(bad, issue("question", q.ID, "category", "пустая категория"))
+	} else if badText(q.Category) {
+		bad = append(bad, issue("question", q.ID, "category", "недопустимые символы"))
+	}
+	if strings.TrimSpace(q.Question) == "" {
+		bad = append(bad, issue("question", q.ID, "question", "пустой вопрос"))
+	} else if badText(q.Question) {
+		bad = append(bad, issue("question", q.ID, "question", "недопустимые символы"))
+	}
+	if strings.TrimSpace(q.Answer) == "" {
+		bad = append(bad, issue("question", q.ID, "answer", "пустой ответ"))
+	} else if badText(q.Answer) {
+		bad = append(bad, issue("question", q.ID, "answer", "недопустимые символы"))
+	}
+	if !allowedGrades[q.Grade] {
+		bad = append(bad, issue("question", q.ID, "grade", "грейд не из списка Junior, Middle, Middle+, Senior, Lead, Easy, Medium"))
+	}
+	if q.Difficulty < 1 || q.Difficulty > 5 {
+		bad = append(bad, issue("question", q.ID, "difficulty", "сложность должна быть от 1 до 5"))
+	}
+	if q.IsAnswered != 0 && q.IsAnswered != 1 {
+		bad = append(bad, issue("question", q.ID, "is_answered", "должно быть 0 или 1"))
+	}
+	if !validTimestamp(q.CreatedAt) {
+		bad = append(bad, issue("question", q.ID, "created_at", "дата должна быть YYYY-MM-DD HH:MM:SS"))
+	}
+	return bad
+}
+
+func filterPrep(items []prepSrc, issues []ImportIssue) ([]prepSrc, []ImportIssue) {
+	seen := map[int64]bool{}
+	out := make([]prepSrc, 0, len(items))
+	for _, it := range items {
+		var bad []ImportIssue
+		if it.ID <= 0 {
+			bad = append(bad, issue("prep_item", it.ID, "id", "нужен положительный id"))
+		}
+		if !allowedTracks[it.Track] {
+			bad = append(bad, issue("prep_item", it.ID, "track", "трек должен быть dumps, patterns, system_design или legend"))
+		}
+		if strings.TrimSpace(it.Question) == "" {
+			bad = append(bad, issue("prep_item", it.ID, "question", "пустой вопрос"))
+		} else if badText(it.Question) {
+			bad = append(bad, issue("prep_item", it.ID, "question", "недопустимые символы"))
+		}
+		if strings.TrimSpace(it.Theory) == "" {
+			bad = append(bad, issue("prep_item", it.ID, "theory", "пустая теория"))
+		} else if badText(it.Theory) {
+			bad = append(bad, issue("prep_item", it.ID, "theory", "недопустимые символы"))
+		}
+		if strings.TrimSpace(it.Answer) == "" {
+			bad = append(bad, issue("prep_item", it.ID, "answer", "пустой ответ"))
+		} else if badText(it.Answer) {
+			bad = append(bad, issue("prep_item", it.ID, "answer", "недопустимые символы"))
+		}
+		if it.Grade != "" && !allowedGrades[it.Grade] {
+			bad = append(bad, issue("prep_item", it.ID, "grade", "грейд не из списка Junior, Middle, Middle+, Senior, Lead, Easy, Medium"))
+		}
+		if it.Difficulty != 0 && (it.Difficulty < 1 || it.Difficulty > 5) {
+			bad = append(bad, issue("prep_item", it.ID, "difficulty", "сложность должна быть от 1 до 5"))
+		}
+		if !allowedSlots[it.Slot] {
+			bad = append(bad, issue("prep_item", it.ID, "slot", "слот должен быть even, odd или weekly"))
+		}
+		if !allowedStatuses[it.Status] {
+			bad = append(bad, issue("prep_item", it.ID, "status", "статус должен быть new, learning или done"))
+		}
+		if it.ID > 0 && seen[it.ID] {
+			bad = append(bad, issue("prep_item", it.ID, "id", "такой id уже есть в файле"))
+		}
+		if len(bad) > 0 {
+			issues = append(issues, bad...)
+			continue
+		}
+		seen[it.ID] = true
+		out = append(out, it)
+	}
+	return out, issues
+}
+
+func filterConcepts(items []conceptSrc, issues []ImportIssue) ([]conceptSrc, []ImportIssue) {
+	seen := map[int64]bool{}
+	out := make([]conceptSrc, 0, len(items))
+	for _, c := range items {
+		var bad []ImportIssue
+		if c.ID <= 0 {
+			bad = append(bad, issue("concept", c.ID, "id", "нужен положительный id"))
+		}
+		if strings.TrimSpace(c.Topic) == "" {
+			bad = append(bad, issue("concept", c.ID, "topic", "пустая тема"))
+		} else if badText(c.Topic) {
+			bad = append(bad, issue("concept", c.ID, "topic", "недопустимые символы"))
+		}
+		if strings.TrimSpace(c.Title) == "" {
+			bad = append(bad, issue("concept", c.ID, "title", "пустой заголовок"))
+		} else if badText(c.Title) {
+			bad = append(bad, issue("concept", c.ID, "title", "недопустимые символы"))
+		}
+		if strings.TrimSpace(c.SimpleExplanation) == "" {
+			bad = append(bad, issue("concept", c.ID, "simple_explanation", "пустое простое объяснение"))
+		} else if badText(c.SimpleExplanation) {
+			bad = append(bad, issue("concept", c.ID, "simple_explanation", "недопустимые символы"))
+		}
+		if !validTimestamp(c.CreatedAt) {
+			bad = append(bad, issue("concept", c.ID, "created_at", "дата должна быть YYYY-MM-DD HH:MM:SS"))
+		}
+		if c.ID > 0 && seen[c.ID] {
+			bad = append(bad, issue("concept", c.ID, "id", "такой id уже есть в файле"))
+		}
+		if len(bad) > 0 {
+			issues = append(issues, bad...)
+			continue
+		}
+		seen[c.ID] = true
+		out = append(out, c)
+	}
+	return out, issues
+}
+
+func filterTracker(items []trackerSrc, issues []ImportIssue) ([]trackerSrc, []ImportIssue) {
+	seen := map[int64]bool{}
+	out := make([]trackerSrc, 0, len(items))
+	for _, t := range items {
+		var bad []ImportIssue
+		if t.ID <= 0 {
+			bad = append(bad, issue("tracker", t.ID, "id", "нужен положительный id"))
+		}
+		if strings.TrimSpace(t.Topic) == "" {
+			bad = append(bad, issue("tracker", t.ID, "topic", "пустая тема"))
+		} else if badText(t.Topic) {
+			bad = append(bad, issue("tracker", t.ID, "topic", "недопустимые символы"))
+		}
+		if strings.TrimSpace(t.Question) == "" {
+			bad = append(bad, issue("tracker", t.ID, "question", "пустой вопрос"))
+		} else if badText(t.Question) {
+			bad = append(bad, issue("tracker", t.ID, "question", "недопустимые символы"))
+		}
+		if t.TimesAsked < 0 {
+			bad = append(bad, issue("tracker", t.ID, "times_asked", "не может быть отрицательным"))
+		}
+		if t.UserUnderstood != 0 && t.UserUnderstood != 1 {
+			bad = append(bad, issue("tracker", t.ID, "user_understood", "должно быть 0 или 1"))
+		}
+		if !validTimestamp(t.LastAsked) {
+			bad = append(bad, issue("tracker", t.ID, "last_asked", "дата должна быть YYYY-MM-DD HH:MM:SS"))
+		}
+		if t.ID > 0 && seen[t.ID] {
+			bad = append(bad, issue("tracker", t.ID, "id", "такой id уже есть в файле"))
+		}
+		if len(bad) > 0 {
+			issues = append(issues, bad...)
+			continue
+		}
+		seen[t.ID] = true
+		out = append(out, t)
+	}
+	return out, issues
+}
+
+func filterTracks(items []trackSrc, issues []ImportIssue) ([]trackSrc, []ImportIssue) {
+	seen := map[string]bool{}
+	out := make([]trackSrc, 0, len(items))
+	for _, t := range items {
+		var bad []ImportIssue
+		if !allowedTracks[t.Code] {
+			bad = append(bad, issue("track", 0, "code", "код должен быть dumps, patterns, system_design или legend"))
+		}
+		if strings.TrimSpace(t.Title) == "" {
+			bad = append(bad, issue("track", 0, "title", "пустой заголовок"))
+		}
+		if strings.TrimSpace(t.Why) == "" {
+			bad = append(bad, issue("track", 0, "why", "пустое поле why"))
+		}
+		if strings.TrimSpace(t.HowToTrain) == "" {
+			bad = append(bad, issue("track", 0, "how_to_train", "пустое поле how_to_train"))
+		}
+		if t.TimeMin <= 0 {
+			bad = append(bad, issue("track", 0, "time_min", "время должно быть больше нуля"))
+		}
+		if t.Code != "" && seen[t.Code] {
+			bad = append(bad, issue("track", 0, "code", "такой код уже есть в файле"))
+		}
+		if len(bad) > 0 {
+			issues = append(issues, bad...)
+			continue
+		}
+		seen[t.Code] = true
+		out = append(out, t)
+	}
+	return out, issues
+}
+
+func filterProtocol(items []protocolSrc, issues []ImportIssue) ([]protocolSrc, []ImportIssue) {
+	out := make([]protocolSrc, 0, len(items))
+	seen := map[int64]bool{}
+	for _, p := range items {
+		if strings.TrimSpace(p.Body) == "" {
+			issues = append(issues, issue("protocol", p.ID, "body", "пустой текст протокола"))
+			continue
+		}
+		id := p.ID
+		if id == 0 {
+			id = 1
+		}
+		if seen[id] {
+			issues = append(issues, issue("protocol", id, "id", "такой id уже есть в файле"))
+			continue
+		}
+		seen[id] = true
+		out = append(out, p)
+	}
+	return out, issues
+}
+
+func issue(kind string, id int64, field, message string) ImportIssue {
+	return ImportIssue{Kind: kind, ID: id, Field: field, Message: message}
+}
+
+func badText(s string) bool {
+	return !utf8.ValidString(s) || strings.Contains(s, "\x00")
+}
+
+func buildPreview(doc knowledgeFile, issues []ImportIssue) []ImportPreview {
+	bad := map[string]bool{}
+	for _, item := range issues {
+		if item.ID > 0 {
+			bad[item.Kind+":"+strconv.FormatInt(item.ID, 10)] = true
+		}
+	}
+	rows := make([]ImportPreview, 0, len(doc.Questions)+len(doc.PrepItems)+len(issues))
+	for _, q := range doc.Questions {
+		rows = append(rows, ImportPreview{
+			Kind:  "question",
+			ID:    q.ID,
+			Title: joinTitle(q.Topic, q.Category),
+			Text:  oneLine(q.Question),
+			OK:    q.ID > 0 && !bad["question:"+strconv.FormatInt(q.ID, 10)],
+		})
+	}
+	for _, it := range doc.PrepItems {
+		rows = append(rows, ImportPreview{
+			Kind:  "prep_item",
+			ID:    it.ID,
+			Title: joinTitle(it.Track, it.Section),
+			Text:  oneLine(it.Question),
+			OK:    it.ID > 0 && !bad["prep_item:"+strconv.FormatInt(it.ID, 10)],
+		})
+	}
+	for _, c := range doc.HardConcepts {
+		rows = append(rows, ImportPreview{
+			Kind:  "concept",
+			ID:    c.ID,
+			Title: oneLine(c.Title),
+			Text:  oneLine(c.SimpleExplanation),
+			OK:    c.ID > 0 && !bad["concept:"+strconv.FormatInt(c.ID, 10)],
+		})
+	}
+	for _, t := range doc.InterviewTracker {
+		rows = append(rows, ImportPreview{
+			Kind:  "tracker",
+			ID:    t.ID,
+			Title: oneLine(t.Topic),
+			Text:  oneLine(t.Question),
+			OK:    t.ID > 0 && !bad["tracker:"+strconv.FormatInt(t.ID, 10)],
+		})
+	}
+	seenTrack := map[string]bool{}
+	for _, t := range doc.PrepTracks {
+		ok := allowedTracks[t.Code] && strings.TrimSpace(t.Title) != "" && strings.TrimSpace(t.Why) != "" && strings.TrimSpace(t.HowToTrain) != "" && t.TimeMin > 0 && !badText(t.Title) && !seenTrack[t.Code]
+		if t.Code != "" {
+			seenTrack[t.Code] = true
+		}
+		rows = append(rows, ImportPreview{
+			Kind:  "track",
+			Title: t.Code,
+			Text:  oneLine(t.Title),
+			OK:    ok,
+		})
+	}
+	for _, p := range doc.PrepProtocol {
+		rows = append(rows, ImportPreview{
+			Kind:  "protocol",
+			ID:    p.ID,
+			Title: "Протокол",
+			Text:  oneLine(p.Body),
+			OK:    strings.TrimSpace(p.Body) != "",
+		})
+	}
+	for _, item := range issues {
+		if !item.Decode {
+			continue
+		}
+		rows = append(rows, ImportPreview{
+			Kind:  item.Kind,
+			Title: fmt.Sprintf("запись %d", item.Index),
+			Text:  oneLine(item.Message),
+			OK:    false,
+		})
+	}
+	return rows
+}
+
+func joinTitle(a, b string) string {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" {
+		return oneLine(b)
+	}
+	if b == "" {
+		return oneLine(a)
+	}
+	return oneLine(a + " / " + b)
+}
+
+func validTimestamp(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return true
+	}
+	if _, err := time.Parse("2006-01-02 15:04:05", s); err == nil {
+		return true
+	}
+	_, err := time.Parse("2006-01-02", s)
+	return err == nil
+}

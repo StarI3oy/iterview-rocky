@@ -17,8 +17,13 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
-  void showSettings() {
+  void showImport() {
     tab = 3;
+    notifyListeners();
+  }
+
+  void showSettings() {
+    tab = 4;
     notifyListeners();
   }
 

@@ -1,3 +1,130 @@
+String importKindLabel(String kind) {
+  return switch (kind) {
+    'question' => 'вопрос',
+    'prep_item' => 'карточка',
+    'concept' => 'концепт',
+    'tracker' => 'трекер',
+    'track' => 'трек',
+    'protocol' => 'протокол',
+    'file' => 'файл',
+    _ => kind.isEmpty ? 'запись' : kind,
+  };
+}
+
+class ImportIssue {
+  const ImportIssue({
+    required this.kind,
+    required this.id,
+    required this.field,
+    required this.message,
+  });
+
+  final String kind;
+  final int id;
+  final String field;
+  final String message;
+
+  factory ImportIssue.fromJson(Map<String, dynamic> j) {
+    return ImportIssue(
+      kind: (j['kind'] ?? '').toString(),
+      id: asInt(j['id']),
+      field: (j['field'] ?? '').toString(),
+      message: (j['message'] ?? '').toString(),
+    );
+  }
+
+  String get label {
+    final where = id > 0
+        ? '${importKindLabel(kind)} #$id'
+        : importKindLabel(kind);
+    if (field.isEmpty) return '$where: $message';
+    return '$where · $field: $message';
+  }
+}
+
+class ImportPreviewRow {
+  const ImportPreviewRow({
+    required this.kind,
+    required this.id,
+    required this.title,
+    required this.text,
+    required this.ok,
+  });
+
+  final String kind;
+  final int id;
+  final String title;
+  final String text;
+  final bool ok;
+
+  factory ImportPreviewRow.fromJson(Map<String, dynamic> j) {
+    return ImportPreviewRow(
+      kind: (j['kind'] ?? '').toString(),
+      id: asInt(j['id']),
+      title: (j['title'] ?? '').toString(),
+      text: (j['text'] ?? '').toString(),
+      ok: asBool(j['ok']),
+    );
+  }
+
+  String get label {
+    final where = id > 0
+        ? '${importKindLabel(kind)} #$id'
+        : importKindLabel(kind);
+    final body = [title, text].where((part) => part.isNotEmpty).join(' — ');
+    return body.isEmpty ? where : '$where · $body';
+  }
+}
+
+class ImportStats {
+  const ImportStats({
+    required this.cards,
+    required this.questions,
+    required this.prepItems,
+    required this.concepts,
+    required this.tracker,
+    required this.rejected,
+    this.issues = const [],
+    this.preview = const [],
+  });
+
+  final int cards;
+  final int questions;
+  final int prepItems;
+  final int concepts;
+  final int tracker;
+  final bool rejected;
+  final List<ImportIssue> issues;
+  final List<ImportPreviewRow> preview;
+
+  factory ImportStats.fromJson(Map<String, dynamic> j) {
+    final issues = <ImportIssue>[];
+    final rawIssues = j['issues'];
+    if (rawIssues is List) {
+      for (final item in rawIssues) {
+        issues.add(ImportIssue.fromJson(asMap(item)));
+      }
+    }
+    final preview = <ImportPreviewRow>[];
+    final rawPreview = j['preview'];
+    if (rawPreview is List) {
+      for (final item in rawPreview) {
+        preview.add(ImportPreviewRow.fromJson(asMap(item)));
+      }
+    }
+    return ImportStats(
+      cards: asInt(j['imported']),
+      questions: asInt(j['questions']),
+      prepItems: asInt(j['prep_items']),
+      concepts: asInt(j['concepts']),
+      tracker: asInt(j['tracker']),
+      rejected: asBool(j['rejected']),
+      issues: issues,
+      preview: preview,
+    );
+  }
+}
+
 int asInt(dynamic v, [int fallback = 0]) {
   if (v is int) return v;
   if (v is num) return v.toInt();

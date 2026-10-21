@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'api.dart';
 import 'screens/dashboard.dart';
+import 'screens/import_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
@@ -108,9 +109,14 @@ class _PrepAppState extends State<PrepApp> {
       theme: buildTheme(),
       home: switch (_gate) {
         _Gate.loading => const Scaffold(
-          body: Center(child: CircularProgressIndicator(color: AppColors.accent)),
+          body: Center(
+            child: CircularProgressIndicator(color: AppColors.accent),
+          ),
         ),
-        _Gate.offline => _Offline(message: _gateError ?? 'Нет связи с API', onRetry: _refreshAuth),
+        _Gate.offline => _Offline(
+          message: _gateError ?? 'Нет связи с API',
+          onRetry: _refreshAuth,
+        ),
         _Gate.setup => LoginScreen(
           api: _api,
           setup: true,
@@ -134,12 +140,17 @@ class _PrepAppState extends State<PrepApp> {
                 api: _api,
                 session: widget.session,
               ),
-              3 => SettingsScreen(
+              2 => SearchScreen(api: _api, session: widget.session),
+              3 => ImportScreen(
                 api: _api,
                 onChangePassword: _changePassword,
                 onLogout: _logout,
               ),
-              _ => SearchScreen(api: _api, session: widget.session),
+              _ => SettingsScreen(
+                api: _api,
+                onChangePassword: _changePassword,
+                onLogout: _logout,
+              ),
             };
             if (wide) {
               return Scaffold(
@@ -163,17 +174,22 @@ class _PrepAppState extends State<PrepApp> {
               bottomNavigationBar: NavigationBar(
                 backgroundColor: AppColors.surface,
                 indicatorColor: AppColors.surface2,
-                selectedIndex: widget.session.tab.clamp(0, 3),
+                selectedIndex: widget.session.tab.clamp(0, 4),
                 onDestinationSelected: (index) {
                   if (index == 0) widget.session.showHome();
                   if (index == 1) widget.session.openSprint();
                   if (index == 2) widget.session.showSearch();
-                  if (index == 3) widget.session.showSettings();
+                  if (index == 3) widget.session.showImport();
+                  if (index == 4) widget.session.showSettings();
                 },
                 destinations: const [
                   NavigationDestination(icon: Icon(Icons.speed), label: 'Планка'),
                   NavigationDestination(icon: Icon(Icons.bolt), label: 'Спринт'),
                   NavigationDestination(icon: Icon(Icons.search), label: 'Поиск'),
+                  NavigationDestination(
+                    icon: Icon(Icons.upload_file),
+                    label: 'Импорт',
+                  ),
                   NavigationDestination(icon: Icon(Icons.tune), label: 'Настройки'),
                 ],
               ),
@@ -203,7 +219,10 @@ class _Offline extends StatelessWidget {
               children: [
                 Text(message, textAlign: TextAlign.center),
                 const SizedBox(height: 16),
-                FilledButton(onPressed: onRetry, child: const Text('Повторить')),
+                FilledButton(
+                  onPressed: onRetry,
+                  child: const Text('Повторить'),
+                ),
               ],
             ),
           ),
@@ -257,8 +276,13 @@ class _SideNav extends StatelessWidget {
               onTap: session.showSearch,
             ),
             _NavButton(
-              label: 'Настройки',
+              label: 'Импорт',
               selected: session.tab == 3,
+              onTap: session.showImport,
+            ),
+            _NavButton(
+              label: 'Настройки',
+              selected: session.tab == 4,
               onTap: session.showSettings,
             ),
             const Spacer(),
