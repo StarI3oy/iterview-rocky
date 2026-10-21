@@ -3,14 +3,17 @@ name: Сборка телефона
 on:
   push:
     branches: [main]
+    tags: ["v*"]
     paths:
       - "prep_app/app/**"
       - "prep_app/scripts/build_mobile.sh"
+      - "prep_app/scripts/publish_release.sh"
       - ".github/workflows/mobile.yml"
   pull_request:
     paths:
       - "prep_app/app/**"
       - "prep_app/scripts/build_mobile.sh"
+      - "prep_app/scripts/publish_release.sh"
       - ".github/workflows/mobile.yml"
   workflow_dispatch:
     inputs:
@@ -173,3 +176,27 @@ jobs:
           path: prep_app/app/build/mobile-out/*
           if-no-files-found: error
           retention-days: 30
+
+  release:
+    name: GitHub Release
+    needs: [android, ios]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Код
+        uses: actions/checkout@v4
+
+      - name: Скачать сборки
+        uses: actions/download-artifact@v4
+        with:
+          pattern: prep-app-*
+          merge-multiple: true
+          path: dist
+
+      - name: Опубликовать релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: ./prep_app/scripts/publish_release.sh dist

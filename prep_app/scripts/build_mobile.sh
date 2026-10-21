@@ -67,6 +67,25 @@ load_version() {
   BUILD_NUMBER="${BUILD_NUMBER:-$default_number}"
 }
 
+# Тег v1.2.3 задаёт имя версии. v1.2.3+4 ещё и номер сборки.
+apply_release_tag() {
+  RELEASE_TAG=""
+  if [[ "${GITHUB_REF:-}" != refs/tags/* ]]; then
+    return
+  fi
+  local ref="${GITHUB_REF_NAME:-}"
+  if [[ ! "$ref" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(\+([0-9]+))?$ ]]; then
+    echo "Тег релиза должен быть вида v1.2.3 или v1.2.3+4, сейчас: ${ref}" >&2
+    exit 1
+  fi
+  BUILD_NAME="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+  if [[ -n "${BASH_REMATCH[5]:-}" ]]; then
+    BUILD_NUMBER="${BASH_REMATCH[5]}"
+  fi
+  RELEASE_TAG="$ref"
+  echo "Релизный тег ${RELEASE_TAG}: версия ${BUILD_NAME}+${BUILD_NUMBER}"
+}
+
 check_api_base() {
   API_BASE="${API_BASE:-http://127.0.0.1:8080}"
   API_BASE="${API_BASE%/}"
@@ -177,6 +196,7 @@ build_android() {
 platform: android
 api_base: ${API_BASE}
 version: ${BUILD_NAME}+${BUILD_NUMBER}
+tag: ${RELEASE_TAG:-}
 signing: ${ANDROID_SIGNING}
 artifact: ${OUT}/prep_app-${BUILD_NAME}+${BUILD_NUMBER}.apk
 EOF
@@ -400,6 +420,7 @@ build_ios() {
 platform: ios
 api_base: ${API_BASE}
 version: ${BUILD_NAME}+${BUILD_NUMBER}
+tag: ${RELEASE_TAG:-}
 signing: ${IOS_SIGNING}
 bundle_id: ${IOS_BUNDLE}
 export_method: ${IOS_METHOD}
@@ -416,6 +437,7 @@ main() {
   require_flutter
   check_api_base
   load_version
+  apply_release_tag
   OUT="${APP}/build/mobile-out"
   mkdir -p "$OUT"
   local flutter_line="" version_line

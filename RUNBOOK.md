@@ -244,13 +244,32 @@ OpenRouter недоступен, ключ отвергнут, модель пу�
 
 Workflow `.github/workflows/mobile.yml`, в Actions он называется «Сборка телефона». Flutter в нём закреплён на `3.47.7` — это ревизия из `prep_app/app/.metadata`.
 
-Запускается сам:
+Релиз — это git-тег. Push в `main` и pull request только проверяют, что проект собирается, и кладут файлы в артефакты Actions на 30 дней. Страница Releases пополняется, когда в репозиторий приходит тег.
 
-- push в `main`, если менялись `prep_app/app`, скрипт сборки или сам workflow;
+### Релиз по тегу
+
+Тег вида `v1.2.3` или `v1.2.3+4`. Он должен указывать на коммит, в котором уже есть workflow `.github/workflows/mobile.yml`. До слияния этой сборки в `main` тег релиз не создаст.
+
+```bash
+git checkout main
+git pull
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Дальше Actions собирает APK и IPA и публикует GitHub Release с тем же именем. Имя версии в приложении берётся из тега. Номер сборки — из `+4`, а если его нет, из номера запуска Actions. Повторный запуск того же тега перезаписывает файлы релиза.
+
+На теге в сборку попадают секреты подписи, если они заданы. В pull request секреты не попадают.
+
+### Проверочные сборки
+
+Запускаются сами:
+
+- push в `main`, если менялись `prep_app/app`, скрипты сборки или сам workflow;
 - pull request с теми же путями;
 - вручную: Actions → Сборка телефона → Run workflow.
 
-Три job: тесты, Android APK на Linux, iOS IPA на runner `xcode-27`. Артефакты лежат 30 дней у завершённого запуска: `prep-app-android-<номер>` и `prep-app-ios-<номер>`. Номер сборки — `github.run_number`, имя версии берётся из `pubspec.yaml`.
+Три job: тесты, Android APK на Linux, iOS IPA на runner `xcode-27`. Без тега четвёртая job «GitHub Release» пропускается. Артефакты лежат 30 дней: `prep-app-android-<номер>` и `prep-app-ios-<номер>`. Вне тега имя версии берётся из `pubspec.yaml`, номер сборки — `github.run_number`.
 
 Адрес сервера компилируется в приложение (`--dart-define=API_BASE`). Откуда он берётся, по порядку:
 
@@ -294,7 +313,7 @@ keytool -genkeypair -v \
   -dname "CN=Prep App, O=Personal, C=RU"
 ```
 
-В pull request секреты в сборку не попадают. Подписанный APK дают push в `main` и ручной запуск.
+В pull request секреты в сборку не попадают. Подписанный APK дают тег, push в `main` и ручной запуск.
 
 `applicationId` сейчас `com.example.prep_app`. Для установки с файла этого хватает. В Play такой идентификатор не примут.
 
