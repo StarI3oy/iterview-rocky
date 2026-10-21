@@ -236,6 +236,43 @@ func postAuthToken(t *testing.T, url, token string, payload any) (int, *http.Res
 	return resp.StatusCode, resp
 }
 
+func TestTrustedProxySeesRealClient(t *testing.T) {
+	srv, g := newGuardServer(t, "")
+	srv.TrustProxy = true
+
+	req := httptest.NewRequest(http.MethodGet, "/api/bar", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set("X-Real-IP", "203.0.113.8")
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("proxied remote %d %s", rr.Code, rr.Body.String())
+	}
+
+	body := `{"password":"correct horse battery","confirm":"correct horse battery"}`
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set("X-Real-IP", "203.0.113.8")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Prep-Client", "1")
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("proxied setup %d %s", rr.Code, rr.Body.String())
+	}
+	if g.PasswordSet() {
+		t.Fatal("proxied setup stored a password")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/bar", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("direct loopback %d %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestCORSReflectsOnlyListedOrigin(t *testing.T) {
 	srv := &Server{AllowedOrigins: []string{"http://localhost:1234"}}
 	req := httptest.NewRequest(http.MethodOptions, "/api/bar", nil)

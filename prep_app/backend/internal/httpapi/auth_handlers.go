@@ -37,7 +37,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	token, exp, err := s.Guard.Login(clientIP(r), body.Password)
+	token, exp, err := s.Guard.Login(clientIP(r, s.TrustProxy), body.Password)
 	if err != nil {
 		writeAuthErr(w, err)
 		return
@@ -55,7 +55,7 @@ func (s *Server) authSetup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("защита не настроена"))
 		return
 	}
-	if !isLoopback(r) {
+	if !isLoopback(r, s.TrustProxy) {
 		writeErr(w, http.StatusForbidden, errors.New("пароль задаётся только с компьютера, где запущен сервер"))
 		return
 	}
@@ -74,7 +74,7 @@ func (s *Server) authSetup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("пароли не совпадают"))
 		return
 	}
-	if err := s.Guard.EnablePassword(clientIP(r), body.Password); err != nil {
+	if err := s.Guard.EnablePassword(clientIP(r, s.TrustProxy), body.Password); err != nil {
 		writeAuthErr(w, err)
 		return
 	}
@@ -110,7 +110,7 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("пароли не совпадают"))
 		return
 	}
-	if err := s.Guard.ChangePassword(clientIP(r), body.Current, body.Password); err != nil {
+	if err := s.Guard.ChangePassword(clientIP(r, s.TrustProxy), body.Current, body.Password); err != nil {
 		writeAuthErr(w, err)
 		return
 	}
