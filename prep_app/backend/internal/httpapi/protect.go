@@ -15,7 +15,7 @@ var (
 	errNeedLogin    = errors.New("нужен вход")
 )
 
-func protect(next http.Handler, g *auth.Guard) http.Handler {
+func protect(next http.Handler, g *auth.Guard, trustProxy bool) http.Handler {
 	if g == nil {
 		return next
 	}
@@ -38,7 +38,7 @@ func protect(next http.Handler, g *auth.Guard) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		case r.URL.Path == "/api/health" && r.Method == http.MethodGet:
-			if isLoopback(r) || g.Authenticate(tokenFrom(r)) {
+			if isLoopback(r, trustProxy) || g.Authenticate(tokenFrom(r)) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -49,7 +49,7 @@ func protect(next http.Handler, g *auth.Guard) http.Handler {
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 			return
 		}
-		if !requestAllowed(g, r) {
+		if !requestAllowed(g, r, trustProxy) {
 			if !g.PasswordSet() {
 				writeErr(w, http.StatusUnauthorized, errNeedPassword)
 				return
@@ -65,9 +65,9 @@ func protect(next http.Handler, g *auth.Guard) http.Handler {
 	})
 }
 
-func requestAllowed(g *auth.Guard, r *http.Request) bool {
+func requestAllowed(g *auth.Guard, r *http.Request, trustProxy bool) bool {
 	if !g.PasswordSet() {
-		return isLoopback(r)
+		return isLoopback(r, trustProxy)
 	}
 	return g.Authenticate(tokenFrom(r))
 }
@@ -93,7 +93,12 @@ func usesCookie(r *http.Request) bool {
 	return err == nil && c.Value != ""
 }
 
-func clientIP(r *http.Request) string {
+func clientIP(r *http.Request, trustProxy bool) string {
+	if trustProxy {
+		if ip := forwardedIP(r); ip != "" {
+			return ip
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
@@ -101,8 +106,23 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-func isLoopback(r *http.Request) bool {
-	ip := net.ParseIP(clientIP(r))
+// forwardedIP is the client address added by the reverse proxy.
+// X-Real-IP wins. Otherwise the first valid address in X-Forwarded-For is used.
+func forwardedIP(r *http.Request) string {
+	if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); net.ParseIP(ip) != nil {
+		return ip
+	}
+	for _, part := range strings.Split(r.Header.Get("X-Forwarded-For"), ",") {
+		ip := strings.TrimSpace(part)
+		if net.ParseIP(ip) != nil {
+			return ip
+		}
+	}
+	return ""
+}
+
+func isLoopback(r *http.Request, trustProxy bool) bool {
+	ip := net.ParseIP(clientIP(r, trustProxy))
 	return ip != nil && ip.IsLoopback()
 }
 

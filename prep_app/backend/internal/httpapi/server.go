@@ -50,7 +50,7 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("/", spaHandler(s.WebDir))
 	}
 	var h http.Handler = mux
-	h = protect(h, s.Guard)
+	h = protect(h, s.Guard, s.TrustProxy)
 	h = withCORS(h, s.AllowedOrigins)
 	h = logRequests(h)
 	return withSecurity(h, s.TrustProxy)
